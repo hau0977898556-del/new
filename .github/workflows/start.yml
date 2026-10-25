@@ -107,7 +107,7 @@ jobs:
               Write-Host "  Found $($serverList.Count) servers"
               
               if ($serverList.Count -gt 0) {
-                $usServers = @($serverList | Where-Object { $_.serverName -like "*US*" -or $_.serverCode -like "*us*" })
+                $usServers = @($serverList | Where-Object { $_.serverName -like "*SG*" -or $_.serverCode -like "*sg*" })
                 if ($usServers.Count -gt 0) {
                   $serverCode = $usServers[0].serverCode
                   $serverDomain = $usServers[0].serverDomain
