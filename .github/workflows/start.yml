@@ -308,17 +308,25 @@ jobs:
           Write-Host "  THIẾT LẬP HÌNH NỀN ĐỘNG: ZHUANG FANGYI"
           Write-Host "========================================"
 
+          # 1. Tải công cụ AutoWall Engine (kèm sẵn mpv.exe chạy mượt mọi định dạng video)
+          Write-Host "[+] Tải AutoWall Wallpaper Engine..."
+          $autoWallDir = "C:\Tools\AutoWall"
+          New-Item -ItemType Directory -Path $autoWallDir -Force | Out-Null
+          $autoWallZip = "$env:TEMP\AutoWall.zip"
+          Invoke-WebRequest -Uri "https://github.com/SegoCode/AutoWall/releases/download/1.6/AutoWall.zip" -OutFile $autoWallZip -TimeoutSec 120
+          Expand-Archive -Path $autoWallZip -DestinationPath "C:\Tools" -Force
+          Remove-Item $autoWallZip -Force
+
+          # 2. Tải file media
           $mediaDir = "C:\Media"
           New-Item -ItemType Directory -Path $mediaDir -Force | Out-Null
           $rawFile = "$mediaDir\raw_media"
-          $finalMp4 = "$mediaDir\wallpaper.mp4"
 
-          # 1. Tải file media
           $url = "https://github.com/huyzeraa/media/raw/refs/heads/main/Zhuang%20Fangyi%20(Arknights:%20Endfield)"
           Write-Host "[+] Đang tải media từ: $url ..."
           Invoke-WebRequest -Uri $url -OutFile $rawFile -TimeoutSec 180
 
-          # 2. Nhận diện MIME
+          # 3. Nhận diện MIME
           $bytes = [System.IO.File]::ReadAllBytes($rawFile)[0..15]
           $detectedExt = ".mp4"
 
@@ -328,49 +336,20 @@ jobs:
             $detectedExt = ".webm"
           } elseif ($bytes[4] -eq 0x66 -and $bytes[5] -eq 0x74 -and $bytes[6] -eq 0x79 -and $bytes[7] -eq 0x70) {
             $detectedExt = ".mp4"
-          } elseif ($bytes[0] -eq 0xFF -and $bytes[1] -eq 0xD8) {
-            $detectedExt = ".jpg"
-          } elseif ($bytes[0] -eq 0x89 -and $bytes[1] -eq 0x50 -and $bytes[2] -eq 0x4E -and $bytes[3] -eq 0x47) {
-            $detectedExt = ".png"
           }
 
           Write-Host "[+] Định dạng phát hiện: $detectedExt"
-          $typedFile = "$mediaDir\source_media$detectedExt"
-          Move-Item -Path $rawFile -Destination $typedFile -Force
+          $wallpaperFile = "$mediaDir\wallpaper$detectedExt"
+          Move-Item -Path $rawFile -Destination $wallpaperFile -Force
 
-          # Convert sang MP4 chuẩn
-          if ($detectedExt -eq ".jpg" -or $detectedExt -eq ".png") {
-            ffmpeg -loop 1 -i $typedFile -c:v libx264 -t 15 -pix_fmt yuv420p -vf "scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080" $finalMp4 -y
-          } elseif ($detectedExt -ne ".mp4") {
-            ffmpeg -i $typedFile -c:v libx264 -pix_fmt yuv420p -y $finalMp4
-          } else {
-            Move-Item -Path $typedFile -Destination $finalMp4 -Force
-          }
-
-          # 3. Tạo hình nền tĩnh phòng hờ
-          $thumbJpg = "$mediaDir\thumb.jpg"
-          ffmpeg -i $finalMp4 -vframes 1 -q:v 2 $thumbJpg -y
-
-          # Set hình nền tĩnh bằng API C# (Không dùng chuỗi nhiều dòng gây lỗi YAML)
-          Add-Type -TypeDefinition 'using System.Runtime.InteropServices; public class W { [DllImport("user32.dll", SetLastError = true)] public static extern bool SystemParametersInfo(int uAction, int uParam, string lpvParam, int fuWinIni); }'
-          [W]::SystemParametersInfo(20, 0, $thumbJpg, 3) | Out-Null
-
-          # 4. Tải AutoWall Wallpaper Engine
-          Write-Host "[+] Tải AutoWall Wallpaper Engine..."
-          $autoWallDir = "C:\Tools\AutoWall"
-          New-Item -ItemType Directory -Path $autoWallDir -Force | Out-Null
-          $autoWallZip = "$env:TEMP\AutoWall.zip"
-          Invoke-WebRequest -Uri "https://github.com/SegoCode/AutoWall/releases/download/1.6/AutoWall.zip" -OutFile $autoWallZip -TimeoutSec 120
-          Expand-Archive -Path $autoWallZip -DestinationPath "C:\Tools" -Force
-          Remove-Item $autoWallZip -Force
-
-          # 5. Tạo file Startup .bat khởi động hình nền động (Dạng mảng an toàn với YAML)
+          # 4. Tạo script khởi động tự động trong thư mục Startup
+          # MPV của AutoWall sẽ tự động phát loop vô tận ngầm dưới icon desktop
           $startupFolder = "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Startup"
           $batLines = @(
             '@echo off',
             'timeout /t 3 /nobreak >nul',
             'cd /d "C:\Tools\AutoWall\mpv"',
-            "start `"`" `"C:\Tools\AutoWall\weebp\wp.exe`" run mpv.exe `"$finalMp4`" --loop=inf --player-operation-mode=pseudo-gui --force-window=yes --no-audio --panscan=1.0",
+            "start `"`" `"C:\Tools\AutoWall\weebp\wp.exe`" run mpv.exe `"$wallpaperFile`" --loop=inf --player-operation-mode=pseudo-gui --force-window=yes --no-audio --panscan=1.0",
             'cd /d "C:\Tools\AutoWall\weebp"',
             'timeout /t 2 /nobreak >nul',
             'wp.exe add --wait --fullscreen --class mpv'
@@ -378,7 +357,7 @@ jobs:
           $batLines | Set-Content -Path "$startupFolder\LiveWallpaper.bat" -Encoding Ascii
 
           Start-Process -FilePath "$startupFolder\LiveWallpaper.bat" -WindowStyle Hidden
-          Write-Host "  ✅ Thiết lập hình nền động hoàn tất!"
+          Write-Host "  ✅ Thiết lập hình nền động Zhuang Fangyi hoàn tất!"
           Write-Host "========================================"
 
       - name: Print connection info
