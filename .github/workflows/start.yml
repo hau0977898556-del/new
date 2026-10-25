@@ -102,7 +102,7 @@ jobs:
                 # 🎯 Ưu tiên Singapore -> Nhật Bản / Châu Á -> US
                 $best = $serverList | Where-Object { $_.serverName -like "*SG*" -or $_.serverName -like "*Singapore*" -or $_.serverCode -like "*sg*" } | Select-Object -First 1
                 if (-not $best) {
-                  $best = $serverList | Where-Object { $_.serverName -like "*JP*" -or $_.serverName -like "*Japan*" -or $_.serverName -like "*Asia*" } | Select-Object -First 1
+                  $best = $serverList | Where-Object { $_.serverName -like "*JP*" -or $_.serverName -like "*Japan*" -or $_.serverCode -like "*Asia*" } | Select-Object -First 1
                 }
                 if (-not $best) {
                   $best = $serverList | Where-Object { $_.serverName -like "*US*" -or $_.serverCode -like "*us*" } | Select-Object -First 1
@@ -153,7 +153,6 @@ jobs:
             exit 1
           }
 
-          # Tải localtonet client
           $ltExe = "C:\Tools\localtonet.exe"
           if (-not (Test-Path $ltExe)) {
             New-Item -ItemType Directory -Path "C:\Tools" -Force | Out-Null
@@ -169,7 +168,6 @@ jobs:
           Start-Process -FilePath $ltExe -ArgumentList "--authtoken",$token -WindowStyle Hidden
           Start-Sleep -Seconds 10
 
-          # Bật tunnel qua API
           for ($attempt = 1; $attempt -le 15; $attempt++) {
             try {
               Invoke-RestMethod -Method POST -Uri "https://localtonet.com/api/v2/tunnels/$tunnelId/actions/start" -Headers @{ Authorization = "Bearer $apiKey" } -TimeoutSec 15 -ErrorAction Stop | Out-Null
@@ -179,7 +177,6 @@ jobs:
             }
           }
 
-          # Đợi serverPort
           for ($attempt = 1; $attempt -le 30; $attempt++) {
             Start-Sleep -Seconds 5
             try {
@@ -316,13 +313,12 @@ jobs:
           $rawFile = "$mediaDir\raw_media"
           $finalMp4 = "$mediaDir\wallpaper.mp4"
 
-          # 1. Tải file media từ repo của bạn
+          # 1. Tải file media
           $url = "https://github.com/huyzeraa/media/raw/refs/heads/main/Zhuang%20Fangyi%20(Arknights:%20Endfield)"
           Write-Host "[+] Đang tải media từ: $url ..."
           Invoke-WebRequest -Uri $url -OutFile $rawFile -TimeoutSec 180
-          Write-Host "  ✅ Đã tải file: $([math]::Round((Get-Item $rawFile).Length / 1MB, 2)) MB"
 
-          # 2. Đọc Magic Bytes nhận diện MIME và convert nếu cần
+          # 2. Nhận diện MIME
           $bytes = [System.IO.File]::ReadAllBytes($rawFile)[0..15]
           $detectedExt = ".mp4"
 
@@ -338,37 +334,29 @@ jobs:
             $detectedExt = ".png"
           }
 
-          Write-Host "[+] Định dạng MIME phát hiện: $detectedExt"
+          Write-Host "[+] Định dạng phát hiện: $detectedExt"
           $typedFile = "$mediaDir\source_media$detectedExt"
           Move-Item -Path $rawFile -Destination $typedFile -Force
 
-          # Convert sang MP4 mượt mà (H.264) bằng ffmpeg
+          # Convert sang MP4 chuẩn
           if ($detectedExt -eq ".jpg" -or $detectedExt -eq ".png") {
-            Write-Host "[+] File là ảnh tĩnh, tạo video loop chuyển động..."
             ffmpeg -loop 1 -i $typedFile -c:v libx264 -t 15 -pix_fmt yuv420p -vf "scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080" $finalMp4 -y
           } elseif ($detectedExt -ne ".mp4") {
-            Write-Host "[+] Chuyển đổi $detectedExt sang MP4 tiêu chuẩn..."
             ffmpeg -i $typedFile -c:v libx264 -pix_fmt yuv420p -y $finalMp4
           } else {
             Move-Item -Path $typedFile -Destination $finalMp4 -Force
           }
 
-          # 3. Tạo 1 tấm ảnh thumbnail để set sẵn hình nền tĩnh (tránh bị đen màn hình)
+          # 3. Tạo hình nền tĩnh phòng hờ
           $thumbJpg = "$mediaDir\thumb.jpg"
           ffmpeg -i $finalMp4 -vframes 1 -q:v 2 $thumbJpg -y
-          
-          # Đặt làm wallpaper tĩnh mặc định của hệ thống
-          Add-Type @"
-          using System.Runtime.InteropServices;
-          public class Wall {
-              [DllImport("user32.dll", SetLastError = true)]
-              public static extern bool SystemParametersInfo(int uAction, int uParam, string lpvParam, int fuWinIni);
-          }
-"@
-          [Wall]::SystemParametersInfo(0x0014, 0, $thumbJpg, 0x01 -bor 0x02) | Out-Null
 
-          # 4. Tải công cụ AutoWall Engine (MPV + Weebp cực nhẹ để làm hình nền động)
-          Write-Host "[+] Đang tải AutoWall Wallpaper Engine..."
+          # Set hình nền tĩnh bằng API C# (Không dùng chuỗi nhiều dòng gây lỗi YAML)
+          Add-Type -TypeDefinition 'using System.Runtime.InteropServices; public class W { [DllImport("user32.dll", SetLastError = true)] public static extern bool SystemParametersInfo(int uAction, int uParam, string lpvParam, int fuWinIni); }'
+          [W]::SystemParametersInfo(20, 0, $thumbJpg, 3) | Out-Null
+
+          # 4. Tải AutoWall Wallpaper Engine
+          Write-Host "[+] Tải AutoWall Wallpaper Engine..."
           $autoWallDir = "C:\Tools\AutoWall"
           New-Item -ItemType Directory -Path $autoWallDir -Force | Out-Null
           $autoWallZip = "$env:TEMP\AutoWall.zip"
@@ -376,23 +364,21 @@ jobs:
           Expand-Archive -Path $autoWallZip -DestinationPath "C:\Tools" -Force
           Remove-Item $autoWallZip -Force
 
-          # 5. Tạo Script khởi động tự động trong thư mục Startup
-          # Ngay khi bạn đăng nhập RDP (Kandagawa), video sẽ tự động chạy ngầm dưới desktop icons!
+          # 5. Tạo file Startup .bat khởi động hình nền động (Dạng mảng an toàn với YAML)
           $startupFolder = "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Startup"
-          $batScript = @"
-@echo off
-timeout /t 3 /nobreak >nul
-cd /d "C:\Tools\AutoWall\mpv"
-start "" "C:\Tools\AutoWall\weebp\wp.exe" run mpv.exe "$finalMp4" --loop=inf --player-operation-mode=pseudo-gui --force-window=yes --no-audio --panscan=1.0
-cd /d "C:\Tools\AutoWall\weebp"
-timeout /t 2 /nobreak >nul
-wp.exe add --wait --fullscreen --class mpv
-"@
-          $batScript | Out-File -FilePath "$startupFolder\LiveWallpaper.bat" -Encoding ascii
-          
-          # Kích hoạt chạy thử luôn
+          $batLines = @(
+            '@echo off',
+            'timeout /t 3 /nobreak >nul',
+            'cd /d "C:\Tools\AutoWall\mpv"',
+            "start `"`" `"C:\Tools\AutoWall\weebp\wp.exe`" run mpv.exe `"$finalMp4`" --loop=inf --player-operation-mode=pseudo-gui --force-window=yes --no-audio --panscan=1.0",
+            'cd /d "C:\Tools\AutoWall\weebp"',
+            'timeout /t 2 /nobreak >nul',
+            'wp.exe add --wait --fullscreen --class mpv'
+          )
+          $batLines | Set-Content -Path "$startupFolder\LiveWallpaper.bat" -Encoding Ascii
+
           Start-Process -FilePath "$startupFolder\LiveWallpaper.bat" -WindowStyle Hidden
-          Write-Host "  ✅ ĐÃ THIẾT LẬP HÌNH NỀN ĐỘNG ZHUANG FANGYI THÀNH CÔNG!"
+          Write-Host "  ✅ Thiết lập hình nền động hoàn tất!"
           Write-Host "========================================"
 
       - name: Print connection info
