@@ -61,7 +61,7 @@ jobs:
 
     steps:
 
-      # --- Localtonet Tunnel (Pure API - No CLI needed) ---
+      # --- Localtonet Tunnel (Ưu tiên Singapore / Châu Á) ---
       - name: Create Localtonet TCP Tunnel via API
         run: |
           $token = "$env:LOCALTONET_TOKEN".Trim()
@@ -71,7 +71,6 @@ jobs:
             exit 0
           }
 
-          # --- Clean up old tunnels first ---
           Write-Host "Cleaning up old tunnels..."
           try {
             $oldTunnels = Invoke-RestMethod -Uri "https://localtonet.com/api/v2/tunnels" -Headers @{ Authorization = "Bearer $apiKey" } -TimeoutSec 15 -ErrorAction Stop
@@ -87,7 +86,6 @@ jobs:
             Write-Host "  No old tunnels to clean up."
           }
 
-          # --- Get available servers via REST API ---
           Write-Host "Fetching available servers from Localtonet API..."
           $serverCode = $null
           $serverDomain = $null
@@ -96,41 +94,37 @@ jobs:
               $srvResp = Invoke-RestMethod -Uri "https://localtonet.com/api/v2/servers" -Headers @{ Authorization = "Bearer $apiKey" } -TimeoutSec 15 -ErrorAction Stop
               
               $serverList = @()
-              if ($srvResp -is [array]) {
-                $serverList = @($srvResp)
-              } elseif ($srvResp.data -and $srvResp.data -is [array]) {
-                $serverList = @($srvResp.data)
-              } elseif ($srvResp.serverCode) {
-                $serverList = @($srvResp)
-              }
-              
-              Write-Host "  Found $($serverList.Count) servers"
+              if ($srvResp -is [array]) { $serverList = @($srvResp) }
+              elseif ($srvResp.data -and $srvResp.data -is [array]) { $serverList = @($srvResp.data) }
+              elseif ($srvResp.serverCode) { $serverList = @($srvResp) }
               
               if ($serverList.Count -gt 0) {
-                $usServers = @($serverList | Where-Object { $_.serverName -like "*SG*" -or $_.serverCode -like "*sg*" })
-                if ($usServers.Count -gt 0) {
-                  $serverCode = $usServers[0].serverCode
-                  $serverDomain = $usServers[0].serverDomain
-                } else {
-                  $serverCode = $serverList[0].serverCode
-                  $serverDomain = $serverList[0].serverDomain
+                # 🎯 Ưu tiên Singapore -> Nhật Bản / Châu Á -> US
+                $best = $serverList | Where-Object { $_.serverName -like "*SG*" -or $_.serverName -like "*Singapore*" -or $_.serverCode -like "*sg*" } | Select-Object -First 1
+                if (-not $best) {
+                  $best = $serverList | Where-Object { $_.serverName -like "*JP*" -or $_.serverName -like "*Japan*" -or $_.serverName -like "*Asia*" } | Select-Object -First 1
                 }
-                Write-Host "  Selected server: $serverCode domain=$serverDomain"
+                if (-not $best) {
+                  $best = $serverList | Where-Object { $_.serverName -like "*US*" -or $_.serverCode -like "*us*" } | Select-Object -First 1
+                }
+                if (-not $best) { $best = $serverList[0] }
+
+                $serverCode = $best.serverCode
+                $serverDomain = $best.serverDomain
+                Write-Host "  🎯 Selected server: $($best.serverName) ($serverCode) domain=$serverDomain"
               }
               break
             } catch {
-              Write-Host "  Attempt $attempt : Servers API error - $($_.Exception.Message)"
               Start-Sleep -Seconds 3
             }
           }
 
           if (-not $serverCode) {
-            Write-Error "Could not get any server from Localtonet API. Check your API key."
+            Write-Error "Could not get any server from Localtonet API."
             exit 1
           }
 
-          # --- Create TCP tunnel via REST API (protocolType=3 = TCP) ---
-          Write-Host "Creating TCP tunnel for port 3389 on server $serverCode..."
+          Write-Host "Creating TCP tunnel for port 3389..."
           $tunnelId = $null
           $publicUrl = $null
 
@@ -148,38 +142,22 @@ jobs:
               $tunnelResp = Invoke-RestMethod -Method POST -Uri "https://localtonet.com/api/v2/tunnels/tcp-udp" -Headers @{ Authorization = "Bearer $apiKey"; "Content-Type" = "application/json" } -Body $body -TimeoutSec 15 -ErrorAction Stop
               if ($tunnelResp.id) {
                 $tunnelId = $tunnelResp.id
-                Write-Host "  Tunnel created! ID: $tunnelId"
                 break
               }
-            } catch {
-              Write-Host "  Attempt $attempt : Create tunnel error - $($_.Exception.Message)"
-            }
+            } catch {}
             Start-Sleep -Seconds 3
           }
 
           if (-not $tunnelId) {
-            Write-Error "FAILED: Could not create Localtonet tunnel after 5 attempts."
+            Write-Error "FAILED: Could not create Localtonet tunnel."
             exit 1
           }
 
-          # --- Download and Start localtonet client ---
-          Write-Host "Downloading localtonet client..."
+          # Tải localtonet client
           $ltExe = "C:\Tools\localtonet.exe"
           if (-not (Test-Path $ltExe)) {
             New-Item -ItemType Directory -Path "C:\Tools" -Force | Out-Null
-            $urls = @(
-              "https://localtonet.com/download/localtonet-win-64.zip",
-              "https://localtonet.com/downloads/localtonet-win-64.zip"
-            )
-            $downloaded = $false
-            foreach ($url in $urls) {
-              try {
-                Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\localtonet.zip" -TimeoutSec 120
-                $downloaded = $true
-                break
-              } catch {}
-            }
-            if (-not $downloaded) { Write-Error "All localtonet download URLs failed"; exit 1 }
+            Invoke-WebRequest -Uri "https://localtonet.com/download/localtonet-win-64.zip" -OutFile "$env:TEMP\localtonet.zip" -TimeoutSec 120
             Expand-Archive -Path "$env:TEMP\localtonet.zip" -DestinationPath "C:\Tools" -Force
             Remove-Item "$env:TEMP\localtonet.zip" -Force
             if (-not (Test-Path $ltExe)) {
@@ -191,26 +169,17 @@ jobs:
           Start-Process -FilePath $ltExe -ArgumentList "--authtoken",$token -WindowStyle Hidden
           Start-Sleep -Seconds 10
 
-          # Start tunnel via API
+          # Bật tunnel qua API
           for ($attempt = 1; $attempt -le 15; $attempt++) {
             try {
               Invoke-RestMethod -Method POST -Uri "https://localtonet.com/api/v2/tunnels/$tunnelId/actions/start" -Headers @{ Authorization = "Bearer $apiKey" } -TimeoutSec 15 -ErrorAction Stop | Out-Null
               break
             } catch {
-              $errMsg = $_.Exception.Message
-              if ($errMsg -like "*Start or Update*" -or $errMsg -like "*localtonet app*") {
-                $ltProc = Get-Process -Name "localtonet" -ErrorAction SilentlyContinue
-                if (-not $ltProc) {
-                  Start-Process -FilePath $ltExe -ArgumentList "--authtoken",$token -WindowStyle Hidden
-                }
-                Start-Sleep -Seconds 5
-              } else {
-                Start-Sleep -Seconds 3
-              }
+              Start-Sleep -Seconds 4
             }
           }
 
-          # Poll for tunnel serverPort
+          # Đợi serverPort
           for ($attempt = 1; $attempt -le 30; $attempt++) {
             Start-Sleep -Seconds 5
             try {
@@ -220,11 +189,8 @@ jobs:
               $sDomain = $tunnelInfo.serverDomain
 
               if ($sPort -and $sPort -gt 0) {
-                if ($sDomain) {
-                  $publicUrl = "tcp://${sDomain}:${sPort}"
-                } elseif ($sIp) {
-                  $publicUrl = "tcp://${sIp}:${sPort}"
-                }
+                if ($sDomain) { $publicUrl = "tcp://${sDomain}:${sPort}" }
+                elseif ($sIp) { $publicUrl = "tcp://${sIp}:${sPort}" }
                 Write-Host "  SUCCESS! Tunnel URL: $publicUrl"
                 break
               }
@@ -236,11 +202,11 @@ jobs:
             "TUNNEL_URL=$publicUrl" | Out-File -Append $env:GITHUB_ENV
             "LOCALTONET_TUNNEL_ID=$tunnelId" | Out-File -Append $env:GITHUB_ENV
           } else {
-            Write-Error "FAILED: Could not get Localtonet tunnel URL after all attempts."
+            Write-Error "FAILED: Could not get Localtonet tunnel URL."
             exit 1
           }
 
-      # --- Core RDP Setup ---
+      # --- Cấu hình RDP ---
       - name: Decide hostname + runtime
         run: |
           if ("${{ inputs.rdp_count }}" -gt 1) { $hn = "kanda${{ matrix.id }}" } else { $hn = "kanda" }
@@ -281,7 +247,7 @@ jobs:
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop" | Out-Null
           Write-Host "RDP ready. user=$u pass=$p host=$env:RDP_HOSTNAME"
 
-      # --- Remove bloatware ---
+      # --- Dọn dẹp bloatware ---
       - name: Remove Unity Hub and bloatware
         run: |
           $uh = Get-ItemProperty "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*" -EA SilentlyContinue |
@@ -307,45 +273,126 @@ jobs:
           Remove-Item "$env:PUBLIC\Desktop\Unity Hub.lnk" -Force -EA SilentlyContinue
           Remove-Item "$env:USERPROFILE\Desktop\Unity Hub.lnk" -Force -EA SilentlyContinue
 
-      # --- 📦 TỰ ĐỘNG CÀI ĐẶT VS CODE VÀ DISCORD ---
+      # --- 📦 Tự động cài đặt VS Code và Discord ---
       - name: 📦 Auto install Discord & VS Code
         run: |
           Write-Host "========================================"
           Write-Host "  CÀI ĐẶT VISUAL STUDIO CODE & DISCORD"
           Write-Host "========================================"
 
-          # 1. Cài đặt Visual Studio Code (System Installer 64-bit cho mọi User)
-          Write-Host "[+] Đang tải VS Code Installer..."
+          # VS Code System Installer
           $vscodeUrl = "https://update.code.visualstudio.com/latest/win32-x64/stable"
           $vscodeInstaller = "$env:TEMP\VSCodeSetup.exe"
           try {
             Invoke-WebRequest -Uri $vscodeUrl -OutFile $vscodeInstaller -TimeoutSec 120
-            Write-Host "[+] Đang cài đặt VS Code ngầm..."
             Start-Process -FilePath $vscodeInstaller -ArgumentList "/verysilent /norestart /MERGETASKS=!runcode,addtopath,desktopicon" -Wait
             Write-Host "  ✅ Visual Studio Code đã cài đặt thành công!"
-          } catch {
-            Write-Warning "  ⚠️ Cài đặt VS Code thất bại: $($_.Exception.Message)"
-          }
+          } catch {}
 
-          # 2. Cài đặt Discord
-          Write-Host "[+] Đang tải Discord Installer..."
+          # Discord
           $discordUrl = "https://discord.com/api/download?platform=win"
           $discordInstaller = "$env:TEMP\DiscordSetup.exe"
           try {
             Invoke-WebRequest -Uri $discordUrl -OutFile $discordInstaller -TimeoutSec 120
-            Write-Host "[+] Đang cài đặt Discord ngầm..."
             Start-Process -FilePath $discordInstaller -ArgumentList "-s" -Wait
             Start-Sleep -Seconds 5
-            
-            # Đảm bảo icon Discord xuất hiện trên Desktop của user Kandagawa
             $discordLnks = Get-ChildItem -Path "$env:USERPROFILE" -Filter "*Discord*.lnk" -Recurse -ErrorAction SilentlyContinue
             foreach ($lnk in $discordLnks) {
               Copy-Item $lnk.FullName "C:\Users\Public\Desktop\" -Force -ErrorAction SilentlyContinue
             }
             Write-Host "  ✅ Discord đã cài đặt thành công!"
-          } catch {
-            Write-Warning "  ⚠️ Cài đặt Discord thất bại: $($_.Exception.Message)"
+          } catch {}
+          Write-Host "========================================"
+
+      # --- 🎬 TỰ ĐỘNG TẢI & THIẾT LẬP HÌNH NỀN ĐỘNG (Zhuang Fangyi) ---
+      - name: 🎬 Auto download media & set Live Wallpaper
+        run: |
+          Write-Host "========================================"
+          Write-Host "  THIẾT LẬP HÌNH NỀN ĐỘNG: ZHUANG FANGYI"
+          Write-Host "========================================"
+
+          $mediaDir = "C:\Media"
+          New-Item -ItemType Directory -Path $mediaDir -Force | Out-Null
+          $rawFile = "$mediaDir\raw_media"
+          $finalMp4 = "$mediaDir\wallpaper.mp4"
+
+          # 1. Tải file media từ repo của bạn
+          $url = "https://github.com/huyzeraa/media/raw/refs/heads/main/Zhuang%20Fangyi%20(Arknights:%20Endfield)"
+          Write-Host "[+] Đang tải media từ: $url ..."
+          Invoke-WebRequest -Uri $url -OutFile $rawFile -TimeoutSec 180
+          Write-Host "  ✅ Đã tải file: $([math]::Round((Get-Item $rawFile).Length / 1MB, 2)) MB"
+
+          # 2. Đọc Magic Bytes nhận diện MIME và convert nếu cần
+          $bytes = [System.IO.File]::ReadAllBytes($rawFile)[0..15]
+          $detectedExt = ".mp4"
+
+          if ($bytes[0] -eq 0x47 -and $bytes[1] -eq 0x49 -and $bytes[2] -eq 0x46) {
+            $detectedExt = ".gif"
+          } elseif ($bytes[0] -eq 0x1A -and $bytes[1] -eq 0x45 -and $bytes[2] -eq 0xDF -and $bytes[3] -eq 0xA3) {
+            $detectedExt = ".webm"
+          } elseif ($bytes[4] -eq 0x66 -and $bytes[5] -eq 0x74 -and $bytes[6] -eq 0x79 -and $bytes[7] -eq 0x70) {
+            $detectedExt = ".mp4"
+          } elseif ($bytes[0] -eq 0xFF -and $bytes[1] -eq 0xD8) {
+            $detectedExt = ".jpg"
+          } elseif ($bytes[0] -eq 0x89 -and $bytes[1] -eq 0x50 -and $bytes[2] -eq 0x4E -and $bytes[3] -eq 0x47) {
+            $detectedExt = ".png"
           }
+
+          Write-Host "[+] Định dạng MIME phát hiện: $detectedExt"
+          $typedFile = "$mediaDir\source_media$detectedExt"
+          Move-Item -Path $rawFile -Destination $typedFile -Force
+
+          # Convert sang MP4 mượt mà (H.264) bằng ffmpeg
+          if ($detectedExt -eq ".jpg" -or $detectedExt -eq ".png") {
+            Write-Host "[+] File là ảnh tĩnh, tạo video loop chuyển động..."
+            ffmpeg -loop 1 -i $typedFile -c:v libx264 -t 15 -pix_fmt yuv420p -vf "scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080" $finalMp4 -y
+          } elseif ($detectedExt -ne ".mp4") {
+            Write-Host "[+] Chuyển đổi $detectedExt sang MP4 tiêu chuẩn..."
+            ffmpeg -i $typedFile -c:v libx264 -pix_fmt yuv420p -y $finalMp4
+          } else {
+            Move-Item -Path $typedFile -Destination $finalMp4 -Force
+          }
+
+          # 3. Tạo 1 tấm ảnh thumbnail để set sẵn hình nền tĩnh (tránh bị đen màn hình)
+          $thumbJpg = "$mediaDir\thumb.jpg"
+          ffmpeg -i $finalMp4 -vframes 1 -q:v 2 $thumbJpg -y
+          
+          # Đặt làm wallpaper tĩnh mặc định của hệ thống
+          Add-Type @"
+          using System.Runtime.InteropServices;
+          public class Wall {
+              [DllImport("user32.dll", SetLastError = true)]
+              public static extern bool SystemParametersInfo(int uAction, int uParam, string lpvParam, int fuWinIni);
+          }
+"@
+          [Wall]::SystemParametersInfo(0x0014, 0, $thumbJpg, 0x01 -bor 0x02) | Out-Null
+
+          # 4. Tải công cụ AutoWall Engine (MPV + Weebp cực nhẹ để làm hình nền động)
+          Write-Host "[+] Đang tải AutoWall Wallpaper Engine..."
+          $autoWallDir = "C:\Tools\AutoWall"
+          New-Item -ItemType Directory -Path $autoWallDir -Force | Out-Null
+          $autoWallZip = "$env:TEMP\AutoWall.zip"
+          Invoke-WebRequest -Uri "https://github.com/SegoCode/AutoWall/releases/download/1.6/AutoWall.zip" -OutFile $autoWallZip -TimeoutSec 120
+          Expand-Archive -Path $autoWallZip -DestinationPath "C:\Tools" -Force
+          Remove-Item $autoWallZip -Force
+
+          # 5. Tạo Script khởi động tự động trong thư mục Startup
+          # Ngay khi bạn đăng nhập RDP (Kandagawa), video sẽ tự động chạy ngầm dưới desktop icons!
+          $startupFolder = "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Startup"
+          $batScript = @"
+@echo off
+timeout /t 3 /nobreak >nul
+cd /d "C:\Tools\AutoWall\mpv"
+start "" "C:\Tools\AutoWall\weebp\wp.exe" run mpv.exe "$finalMp4" --loop=inf --player-operation-mode=pseudo-gui --force-window=yes --no-audio --panscan=1.0
+cd /d "C:\Tools\AutoWall\weebp"
+timeout /t 2 /nobreak >nul
+wp.exe add --wait --fullscreen --class mpv
+"@
+          $batScript | Out-File -FilePath "$startupFolder\LiveWallpaper.bat" -Encoding ascii
+          
+          # Kích hoạt chạy thử luôn
+          Start-Process -FilePath "$startupFolder\LiveWallpaper.bat" -WindowStyle Hidden
+          Write-Host "  ✅ ĐÃ THIẾT LẬP HÌNH NỀN ĐỘNG ZHUANG FANGYI THÀNH CÔNG!"
           Write-Host "========================================"
 
       - name: Print connection info
@@ -360,7 +407,6 @@ jobs:
           Write-Host "  Runtime      : $env:RUNTIME_MINUTES min"
           Write-Host "========================================"
 
-          # Save to connection-info.txt
           $infoFileName = if ("${{ inputs.rdp_count }}" -gt 1) { "connection-info-${{ matrix.id }}.txt" } else { "connection-info.txt" }
           "infoFileName=$infoFileName" | Out-File -Append $env:GITHUB_ENV
 
@@ -496,7 +542,7 @@ jobs:
                   } catch {}
                 }
 
-                # 2. Lấy Server mới
+                # 2. Lấy Server mới (Ưu tiên Singapore / Châu Á)
                 $newServerCode = $null
                 try {
                   $srvResp = Invoke-RestMethod -Uri "https://localtonet.com/api/v2/servers" -Headers @{ Authorization = "Bearer $apiKey" } -TimeoutSec 15 -ErrorAction Stop
@@ -506,8 +552,15 @@ jobs:
                   elseif ($srvResp.serverCode) { $serverList = @($srvResp) }
 
                   if ($serverList.Count -gt 0) {
-                    $usServers = @($serverList | Where-Object { $_.serverName -like "*US*" -or $_.serverCode -like "*us*" })
-                    if ($usServers.Count -gt 0) { $newServerCode = $usServers[0].serverCode } else { $newServerCode = $serverList[0].serverCode }
+                    $bestSrv = $serverList | Where-Object { $_.serverName -like "*SG*" -or $_.serverName -like "*Singapore*" -or $_.serverCode -like "*sg*" } | Select-Object -First 1
+                    if (-not $bestSrv) {
+                      $bestSrv = $serverList | Where-Object { $_.serverName -like "*JP*" -or $_.serverName -like "*Japan*" -or $_.serverCode -like "*Asia*" } | Select-Object -First 1
+                    }
+                    if (-not $bestSrv) {
+                      $bestSrv = $serverList | Where-Object { $_.serverName -like "*US*" -or $_.serverCode -like "*us*" } | Select-Object -First 1
+                    }
+                    if (-not $bestSrv) { $bestSrv = $serverList[0] }
+                    $newServerCode = $bestSrv.serverCode
                   }
                 } catch {}
 
