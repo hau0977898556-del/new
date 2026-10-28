@@ -322,7 +322,7 @@ jobs:
           New-Item -ItemType Directory -Path $mediaDir -Force | Out-Null
           $rawFile = "$mediaDir\raw_media"
 
-          $url = "https://github.com/huyzeraa/media/raw/refs/heads/main/Zhuang%20Fangyi%20(Arknights:%20Endfield)"
+          $url = "https://github.com/huyzeraa/media/raw/refs/heads/main/Zhuang%20Fangyi%20(Arknights:%20Endfield).mp4"
           Write-Host "[+] Đang tải media từ: $url ..."
           Invoke-WebRequest -Uri $url -OutFile $rawFile -TimeoutSec 180
 
