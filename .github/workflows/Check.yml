@@ -1,4 +1,156 @@
-- name: Test display
-  run: |
-    Add-Type -AssemblyName System.Windows.Forms
-    [System.Windows.Forms.MessageBox]::Show("test")
+name: Windows GUI Win32 & Pixel Clicker All-In-One
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  gui-pixel-check:
+    runs-on: windows-latest
+
+    steps:
+      - name: Set Fixed Screen Resolution
+        shell: powershell
+        run: |
+          # Ép độ phân giải màn hình cố định 1920x1080 để tọa độ pixel không bị lệch
+          Set-DisplayResolution -Width 1920 -Height 1080 -Force
+          Get-DisplayResolution
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install pywin32 playwright pillow mss pyautogui
+          playwright install chromium
+
+      - name: Run GUI, Win32 SetWindowPos & Pixel Clicker Test
+        shell: bash
+        run: |
+          python - << 'EOF'
+          import os
+          import time
+          import win32gui
+          import win32con
+          import mss
+          from PIL import Image
+          from playwright.sync_api import sync_playwright
+
+          os.makedirs("screenshots", exist_ok=True)
+
+          # Giao diện HTML có một hộp màu đỏ (#FF0000), click vào sẽ đổi sang xanh lá (#00FF00)
+          HTML_CONTENT = """
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <title>Win32ClickerApp</title>
+              <style>
+                  body { margin: 0; padding: 0; background: #FFFFFF; }
+                  #target {
+                      position: absolute;
+                      left: 120px;
+                      top: 120px;
+                      width: 100px;
+                      height: 100px;
+                      background-color: #FF0000;
+                  }
+              </style>
+          </head>
+          <body>
+              <div id="target" onclick="this.style.backgroundColor='#00FF00'"></div>
+          </body>
+          </html>
+          """
+
+          with sync_playwright() as p:
+              print("[1/4] Khởi chạy Browser hiện lên màn hình (headed)...")
+              browser = p.chromium.launch(
+                  headless=False,
+                  args=["--window-position=0,0", "--disable-gpu-sandbox"]
+              )
+              context = browser.new_context(viewport=None)
+              page = context.new_page()
+              page.set_content(HTML_CONTENT)
+              time.sleep(2) # Chờ browser vẽ GUI
+
+              print("[2/4] Kiểm tra Win32 SetWindowPos...")
+              # Tìm HWND của cửa sổ theo title
+              hwnd = 0
+              for _ in range(10):
+                  def enum_cb(h, extra):
+                      if "Win32ClickerApp" in win32gui.GetWindowText(h):
+                          extra.append(h)
+                  found = []
+                  win32gui.EnumWindows(enum_cb, found)
+                  if found:
+                      hwnd = found[0]
+                      break
+                  time.sleep(0.5)
+
+              assert hwnd != 0, "LỖI: Không tìm thấy HWND của cửa sổ Browser!"
+
+              # Win32 API: Ép cửa sổ về vị trí (0, 0), kích thước 900x700
+              win32gui.SetWindowPos(
+                  hwnd,
+                  win32con.HWND_TOP,
+                  0, 0, 900, 700,
+                  win32con.SWP_SHOWWINDOW
+              )
+              win32gui.SetForegroundWindow(hwnd)
+              time.sleep(1)
+
+              print("[3/4] Quét Pixel rendering cho Clicker...")
+              # Chụp ảnh toàn màn hình qua MSS
+              with mss.mss() as sct:
+                  screenshot = sct.grab(sct.monitors[1])
+                  img = Image.frombytes("RGB", screenshot.size, screenshot.bgra, "raw", "BGRX")
+                  img.save("screenshots/1_before_click.png")
+
+              # Quét tìm điểm màu đỏ thuần (R > 240, G < 30, B < 30)
+              target_point = None
+              width, height = img.size
+              for x in range(50, min(500, width), 5):
+                  for y in range(50, min(500, height), 5):
+                      r, g, b = img.getpixel((x, y))
+                      if r > 240 and g < 30 and b < 30:
+                          target_point = (x, y)
+                          print(f"-> Tìm thấy Pixel mục tiêu tại ({x}, {y}) - RGB: ({r}, {g}, {b})")
+                          break
+                  if target_point:
+                      break
+
+              assert target_point is not None, "LỖI: Không render được pixel đỏ trên màn hình!"
+
+              print(f"[4/4] Clicker thao tác tại {target_point}...")
+              # Click trực tiếp lên tọa độ màn hình đã quét được
+              page.mouse.click(target_point[0], target_point[1])
+              time.sleep(1)
+
+              # Chụp màn hình kiểm chứng kết quả sau click
+              with mss.mss() as sct:
+                  screenshot_after = sct.grab(sct.monitors[1])
+                  img_after = Image.frombytes("RGB", screenshot_after.size, screenshot_after.bgra, "raw", "BGRX")
+                  img_after.save("screenshots/2_after_click.png")
+
+              # Kiểm tra pixel tại điểm đó đã đổi sang xanh lá (G > 240)
+              r_after, g_after, b_after = img_after.getpixel(target_point)
+              print(f"-> Pixel sau click - RGB: ({r_after}, {g_after}, {b_after})")
+              assert g_after > 240, "LỖI: Thao tác click không kích hoạt đổi màu pixel!"
+
+              print(">>> PASS: Tất cả Win32 SetWindowPos, GUI Render, Pixel Clicker hoạt động chính xác! <<<")
+              browser.close()
+          EOF
+
+      - name: Upload Screenshot Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screen-results
+          path: screenshots/
