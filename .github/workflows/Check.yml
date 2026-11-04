@@ -10,12 +10,16 @@ on:
 jobs:
   gui-pixel-check:
     runs-on: windows-latest
+    
+    # Ép Python sử dụng UTF-8 cho toàn bộ output trên Windows
+    env:
+      PYTHONIOENCODING: "utf-8"
+      PYTHONUTF8: "1"
 
     steps:
       - name: Set Fixed Screen Resolution
         shell: powershell
         run: |
-          # Ép độ phân giải màn hình cố định 1920x1080 để tọa độ pixel không bị lệch
           Set-DisplayResolution -Width 1920 -Height 1080 -Force
           Get-DisplayResolution
 
@@ -35,8 +39,15 @@ jobs:
         shell: bash
         run: |
           python - << 'EOF'
+          import sys
           import os
           import time
+          
+          # Cấu hình an toàn cho encoding stdout/stderr
+          if hasattr(sys.stdout, 'reconfigure'):
+              sys.stdout.reconfigure(encoding='utf-8')
+              sys.stderr.reconfigure(encoding='utf-8')
+
           import win32gui
           import win32con
           import mss
@@ -45,7 +56,6 @@ jobs:
 
           os.makedirs("screenshots", exist_ok=True)
 
-          # Giao diện HTML có một hộp màu đỏ (#FF0000), click vào sẽ đổi sang xanh lá (#00FF00)
           HTML_CONTENT = """
           <!DOCTYPE html>
           <html>
@@ -78,10 +88,9 @@ jobs:
               context = browser.new_context(viewport=None)
               page = context.new_page()
               page.set_content(HTML_CONTENT)
-              time.sleep(2) # Chờ browser vẽ GUI
+              time.sleep(2)
 
               print("[2/4] Kiểm tra Win32 SetWindowPos...")
-              # Tìm HWND của cửa sổ theo title
               hwnd = 0
               for _ in range(10):
                   def enum_cb(h, extra):
@@ -107,7 +116,6 @@ jobs:
               time.sleep(1)
 
               print("[3/4] Quét Pixel rendering cho Clicker...")
-              # Chụp ảnh toàn màn hình qua MSS
               with mss.mss() as sct:
                   screenshot = sct.grab(sct.monitors[1])
                   img = Image.frombytes("RGB", screenshot.size, screenshot.bgra, "raw", "BGRX")
@@ -129,17 +137,15 @@ jobs:
               assert target_point is not None, "LỖI: Không render được pixel đỏ trên màn hình!"
 
               print(f"[4/4] Clicker thao tác tại {target_point}...")
-              # Click trực tiếp lên tọa độ màn hình đã quét được
               page.mouse.click(target_point[0], target_point[1])
               time.sleep(1)
 
-              # Chụp màn hình kiểm chứng kết quả sau click
+              # Kiểm chứng sau khi click
               with mss.mss() as sct:
                   screenshot_after = sct.grab(sct.monitors[1])
                   img_after = Image.frombytes("RGB", screenshot_after.size, screenshot_after.bgra, "raw", "BGRX")
                   img_after.save("screenshots/2_after_click.png")
 
-              # Kiểm tra pixel tại điểm đó đã đổi sang xanh lá (G > 240)
               r_after, g_after, b_after = img_after.getpixel(target_point)
               print(f"-> Pixel sau click - RGB: ({r_after}, {g_after}, {b_after})")
               assert g_after > 240, "LỖI: Thao tác click không kích hoạt đổi màu pixel!"
