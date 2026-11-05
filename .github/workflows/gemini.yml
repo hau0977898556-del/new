@@ -1,0 +1,134 @@
+name: Google AI Pro 2-Year Auto Console
+
+on:
+  workflow_dispatch:
+    inputs:
+      auto_run_batch:
+        description: "Tự động chạy batch tài khoản ngay khi bật (True/False)"
+        type: boolean
+        default: false
+      runtime_hours:
+        description: "Thời gian duy trì bảng điều khiển (tiếng, tối đa 5)"
+        required: false
+        default: "3"
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  run-console:
+    runs-on: windows-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: ⬇️ Checkout tool repository
+        uses: actions/checkout@v4
+        with:
+          repository: "worldonlyu/Google_AI_Pro_2Year_ZeroCost_Auto"
+
+      - name: 🐍 Cài đặt Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: "pip"
+
+      - name: 📦 Cài đặt thư viện phụ thuộc
+        shell: pwsh
+        run: |
+          Write-Host "📥 Đang cài đặt thư viện từ requirements.txt..."
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          Write-Host "✅ Đã cài đặt xong thư viện!"
+
+      - name: 🌐 Khởi động Web Console (FastAPI Port 8765)
+        shell: pwsh
+        run: |
+          Write-Host "🚀 Đang khởi chạy app.py ngầm tại cổng 8765..."
+          Start-Process -FilePath "python" -ArgumentList "app.py" -WindowStyle Hidden
+          Start-Sleep -Seconds 5
+
+          # Kiểm tra xem cổng 8765 đã mở chưa
+          $check = Test-NetConnection -ComputerName "127.0.0.1" -Port 8765 -WarningAction SilentlyContinue
+          if ($check.TcpTestSucceeded) {
+            Write-Host "✅ Web Console đã khởi động thành công trên cổng 8765!"
+          } else {
+            Write-Host "⚠️ Đang đợi dịch vụ..."
+            Start-Sleep -Seconds 5
+          }
+
+      - name: 🚇 Mở đường hầm Cloudflare Tunnel
+        shell: pwsh
+        run: |
+          Write-Host "📥 Đang tải Cloudflared..."
+          Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "cloudflared.exe" -TimeoutSec 60
+
+          Write-Host "🚀 Đang tạo Public URL cho Web Console..."
+          Start-Process -FilePath ".\cloudflared.exe" -ArgumentList "tunnel --url http://localhost:8765 --logfile cloudflared.log --no-autoupdate" -WindowStyle Hidden
+          
+          $maxAttempts = 20
+          $webUrl = ""
+          for ($i = 1; $i -le $maxAttempts; $i++) {
+            Start-Sleep -Seconds 2
+            if (Test-Path "cloudflared.log") {
+              $log = Get-Content "cloudflared.log" -Raw -ErrorAction SilentlyContinue
+              if ($log -match 'https://([a-zA-Z0-9-]+\.trycloudflare\.com)') {
+                $webUrl = "https://$($matches[1])"
+                break
+              }
+            }
+            Write-Host "⏳ Đang lấy link Cloudflare... ($i/$maxAttempts)"
+          }
+
+          if (-not $webUrl) {
+            Write-Host "❌ Lỗi tạo tunnel! Log chi tiết:"
+            Get-Content "cloudflared.log" -ErrorAction SilentlyContinue | Write-Host
+            exit 1
+          }
+
+          Write-Host ""
+          Write-Host "=========================================================="
+          Write-Host "🎉 BẢNG ĐIỀU KHIỂN GOOGLE AI PRO ĐÃ SẴN SÀNG!"
+          Write-Host "🔗 Truy cập ngay tại : $webUrl"
+          Write-Host "📍 Vị trí máy chủ    : US (Mỹ) - Đạt chuẩn điều kiện của Google"
+          Write-Host "=========================================================="
+          Write-Host ""
+
+          # Ghi link vào tóm tắt của Action (GitHub Step Summary)
+          @(
+            "## 🚀 Google AI Pro 2-Year Auto Console",
+            "",
+            "👉 **Bấm vào link dưới đây để mở giao diện điều khiển:**",
+            "[🔗 Mở Web Console]($webUrl)",
+            "",
+            "- **Vị trí Runner:** United States (Azure Datacenter)",
+            "- **Trạng thái:** Sẵn sàng nhập thẻ & chạy tài khoản"
+          ) | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+
+      - name: ⏳ Duy trì phiên làm việc
+        shell: pwsh
+        run: |
+          $hours = [double]"${{ github.event.inputs.runtime_hours }}"
+          if ($hours -lt 0.5 -or $hours -gt 5) { $hours = 3 }
+          $totalMinutes = [int]($hours * 60)
+          $end = (Get-Date).AddMinutes($totalMinutes)
+
+          Write-Host "🟢 Web Console sẽ hoạt động trong $hours tiếng ($totalMinutes phút)..."
+          Write-Host "👉 Bạn có thể mở link trên để nhập thẻ, paste danh sách tài khoản và bấm chạy!"
+
+          $i = 0
+          while ((Get-Date) -lt $end) {
+            $i++
+            $left = $end - (Get-Date)
+            $leftStr = $left.ToString('hh\:mm\:ss')
+            Write-Host "[$((Get-Date).ToString('HH:mm:ss'))] Heartbeat #$i | Thời gian còn lại: $leftStr"
+            Start-Sleep -Seconds 60
+          }
+
+      - name: 📸 Lưu ảnh chụp màn hình kết quả (Artifacts)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: google-ai-screenshots
+          path: screenshots/
+          if-no-files-found: ignore
