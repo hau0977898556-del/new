@@ -6,7 +6,7 @@ on:
       runtime_minutes:
         description: "Thời gian chạy (tối đa 355 phút)"
         required: false
-        default: "350"
+        default: "355"
 
 permissions:
   contents: write
@@ -42,7 +42,6 @@ jobs:
             Add-LocalGroupMember -Group "Administrators" -Member $u
           }
           
-          # Tắt tường lửa để BetterGFN stream không bị cản trở
           Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
           Write-Host "✅ Hoàn tất thiết lập hệ thống!"
 
@@ -77,34 +76,86 @@ jobs:
             Write-Host "  ✅ Đã cài đặt Discord!"
           } catch {}
 
-      # --- 4. Tải & Cài hình nền động Zhuang Fangyi ---
+      # --- 4. Tải & Cài hình nền động Zhuang Fangyi (Fix lỗi 404 Private Repo) ---
       - name: 🎬 Thiết lập hình nền động Zhuang Fangyi
         run: |
           $mediaDir = "C:\Media"
           New-Item -ItemType Directory -Path $mediaDir -Force | Out-Null
-          
-          # Tải AutoWall Engine
-          Invoke-WebRequest -Uri "https://github.com/SegoCode/AutoWall/releases/download/1.6/AutoWall.zip" -OutFile "$env:TEMP\AutoWall.zip" -TimeoutSec 120
-          Expand-Archive -Path "$env:TEMP\AutoWall.zip" -DestinationPath "C:\Tools" -Force
+          $dest = "$mediaDir\wallpaper.mp4"
+          $downloaded = $false
 
-          # Tải media
-          $url = "https://github.com/huyzeraa/media/raw/refs/heads/main/Zhuang%20Fangyi%20(Arknights:%20Endfield)"
-          Invoke-WebRequest -Uri $url -OutFile "$mediaDir\wallpaper.mp4" -TimeoutSec 180
+          # Thiết lập Header xác thực (cho cả Repo Private)
+          $headers = @{}
+          if ($env:GH_TOKEN) {
+            $headers["Authorization"] = "Bearer $env:GH_TOKEN"
+          }
 
-          # Thiết lập tự chạy hình nền khi đăng nhập
-          $startupFolder = "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Startup"
-          $batLines = @(
-            '@echo off',
-            'timeout /t 3 /nobreak >nul',
-            'cd /d "C:\Tools\AutoWall\mpv"',
-            'start "" "C:\Tools\AutoWall\weebp\wp.exe" run mpv.exe "C:\Media\wallpaper.mp4" --loop=inf --player-operation-mode=pseudo-gui --force-window=yes --no-audio --panscan=1.0',
-            'cd /d "C:\Tools\AutoWall\weebp"',
-            'timeout /t 2 /nobreak >nul',
-            'wp.exe add --wait --fullscreen --class mpv'
+          # 1. Thử tải qua các link raw chuẩn
+          $rawUrls = @(
+            "https://raw.githubusercontent.com/huyzeraa/media/main/Zhuang%20Fangyi%20(Arknights:%20Endfield)",
+            "https://raw.githubusercontent.com/huyzeraa/media/master/Zhuang%20Fangyi%20(Arknights:%20Endfield)"
           )
-          $batLines | Set-Content -Path "$startupFolder\LiveWallpaper.bat" -Encoding Ascii
-          Start-Process -FilePath "$startupFolder\LiveWallpaper.bat" -WindowStyle Hidden
-          Write-Host "✅ Đã cài đặt hình nền động Zhuang Fangyi!"
+
+          foreach ($u in $rawUrls) {
+            try {
+              Write-Host "[+] Đang thử tải từ: $u"
+              Invoke-WebRequest -Uri $u -Headers $headers -OutFile $dest -TimeoutSec 120 -ErrorAction Stop
+              if ((Test-Path $dest) -and ((Get-Item $dest).Length -gt 10240)) {
+                $downloaded = $true
+                Write-Host "  ✅ Tải media thành công từ raw URL!"
+                break
+              }
+            } catch {
+              Write-Host "  ⚠️ Không thể tải từ $u : $($_.Exception.Message)"
+            }
+          }
+
+          # 2. Nếu repo Private, thử tải qua GitHub Contents API
+          if (-not $downloaded -and $env:GH_TOKEN) {
+            try {
+              Write-Host "[+] Thử tải qua GitHub API (hỗ trợ repo Private)..."
+              $apiUri = "https://api.github.com/repos/huyzeraa/media/contents/Zhuang%20Fangyi%20(Arknights:%20Endfield)"
+              $apiHeaders = @{
+                "Authorization" = "Bearer $env:GH_TOKEN"
+                "Accept" = "application/vnd.github.raw+json"
+                "X-GitHub-Api-Version" = "2022-11-28"
+              }
+              Invoke-RestMethod -Uri $apiUri -Headers $apiHeaders -OutFile $dest -TimeoutSec 180 -ErrorAction Stop
+              if ((Test-Path $dest) -and ((Get-Item $dest).Length -gt 10240)) {
+                $downloaded = $true
+                Write-Host "  ✅ Tải media thành công qua GitHub API!"
+              }
+            } catch {
+              Write-Host "  ⚠️ Không thể tải qua API: $($_.Exception.Message)"
+            }
+          }
+
+          # 3. Kích hoạt AutoWall nếu tải thành công
+          if ($downloaded) {
+            try {
+              Write-Host "[+] Cài đặt AutoWall Wallpaper Engine..."
+              Invoke-WebRequest -Uri "https://github.com/SegoCode/AutoWall/releases/download/1.6/AutoWall.zip" -OutFile "$env:TEMP\AutoWall.zip" -TimeoutSec 120
+              Expand-Archive -Path "$env:TEMP\AutoWall.zip" -DestinationPath "C:\Tools" -Force
+
+              $startupFolder = "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Startup"
+              $batLines = @(
+                '@echo off',
+                'timeout /t 3 /nobreak >nul',
+                'cd /d "C:\Tools\AutoWall\mpv"',
+                'start "" "C:\Tools\AutoWall\weebp\wp.exe" run mpv.exe "C:\Media\wallpaper.mp4" --loop=inf --player-operation-mode=pseudo-gui --force-window=yes --no-audio --panscan=1.0',
+                'cd /d "C:\Tools\AutoWall\weebp"',
+                'timeout /t 2 /nobreak >nul',
+                'wp.exe add --wait --fullscreen --class mpv'
+              )
+              $batLines | Set-Content -Path "$startupFolder\LiveWallpaper.bat" -Encoding Ascii
+              Start-Process -FilePath "$startupFolder\LiveWallpaper.bat" -WindowStyle Hidden
+              Write-Host "  ✅ Thiết lập hình nền động Zhuang Fangyi thành công!"
+            } catch {
+              Write-Warning "Lỗi cấu hình AutoWall: $_"
+            }
+          } else {
+            Write-Host "⚠️ Không tải được file media (kiểm tra lại tên file hoặc quyền token). Bỏ qua bước hình nền để tiếp tục khởi chạy VPS!"
+          }
 
       # --- 5. TẢI VÀ KHỞI ĐỘNG BETTERGFN TUNNEL HOST ---
       - name: 🚀 Khởi chạy BetterGFN Tunnel Host
@@ -117,7 +168,6 @@ jobs:
           New-Item -ItemType Directory -Path $gfnDir -Force | Out-Null
           $gfnExe = "$gfnDir\BetterGFN-Tunnel-Release.exe"
 
-          # Tải bản phát hành BetterGFN Tunnel mới nhất từ tác giả kmille36
           $downloadUrl = "https://github.com/kmille36/Better-Geforce-Now-Android/releases/download/2.2.0/BetterGFN-Tunnel-Release.exe"
           Write-Host "[+] Tải BetterGFN Host từ GitHub Releases..."
           try {
@@ -128,19 +178,16 @@ jobs:
             Invoke-WebRequest -Uri "https://2z2.top/download/BetterGFN-Tunnel-Release.exe" -OutFile $gfnExe -TimeoutSec 120
           }
 
-          # Khởi động BetterGFN Host ngầm và ghi log
           Set-Location $gfnDir
           Write-Host "[+] Đang khởi động BetterGFN Host & Cloudflare Tunnel..."
           Start-Process -FilePath $gfnExe -RedirectStandardOutput "$gfnDir\host.log" -RedirectStandardError "$gfnDir\host_err.log" -WindowStyle Hidden
           
-          # Đợi và lọc lấy WebSocket Cloudflare URL
           $wsUrl = ""
           $maxWait = 30
           for ($i = 1; $i -le $maxWait; $i++) {
             Start-Sleep -Seconds 2
             if (Test-Path "$gfnDir\host.log") {
               $logContent = Get-Content "$gfnDir\host.log" -Raw -ErrorAction SilentlyContinue
-              # Bắt các định dạng link Cloudflare
               if ($logContent -match '(https?://[a-zA-Z0-9-]+\.trycloudflare\.com)') {
                 $rawDomain = $matches[1] -replace 'https?://', ''
                 $wsUrl = "ws://$rawDomain"
@@ -167,7 +214,6 @@ jobs:
           Write-Host "=========================================================="
           Write-Host ""
 
-          # Ghi link vào tóm tắt của Action (GitHub Step Summary)
           @(
             "## 🎮 BetterGFN Remote Streaming Sẵn Sàng!",
             "",
@@ -177,10 +223,9 @@ jobs:
             "```",
             "",
             "- **Trạng thái:** Host đang stream mượt 60fps",
-            "- **Tính năng:** Đã tích hợp VS Code, Discord, Live Wallpaper"
+            "- **Tính năng:** Đã tích hợp VS Code, Discord"
           ) | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
 
-          # Lưu vào file bettergfn-url.txt trên repo
           try {
             $wsUrl | Out-File -FilePath "bettergfn-url.txt" -Encoding UTF8
             git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -193,7 +238,7 @@ jobs:
 
           "BETTERGFN_WS_URL=$wsUrl" | Out-File -Append $env:GITHUB_ENV
 
-      # --- 6. Duy trì phiên hoạt động (~5.5 tiếng) ---
+      # --- 6. Duy trì phiên hoạt động ---
       - name: ⏳ Giữ VPS sống
         run: |
           $mins = [int]"${{ github.event.inputs.runtime_minutes }}"
@@ -211,7 +256,7 @@ jobs:
             Start-Sleep -Seconds 60
           }
 
-      # --- 7. Tự động Restart phiên mới ---
+      # --- 7. Tự động Restart phiên mới (Tự động nhận diện ID) ---
       - name: 🔄 Tự động Restart phiên mới
         if: always()
         run: |
@@ -230,7 +275,12 @@ jobs:
               "X-GitHub-Api-Version" = "2022-11-28"
             }
             $payload = @{ ref = "${{ github.ref_name }}" } | ConvertTo-Json
-            Invoke-RestMethod -Uri "https://api.github.com/repos/${{ github.repository }}/actions/workflows/bettergfn-vps.yml/dispatches" -Method Post -Headers $headers -Body $payload -TimeoutSec 30
+
+            $runInfo = Invoke-RestMethod -Uri "https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}" -Headers $headers -TimeoutSec 15
+            $wfId = $runInfo.workflow_id
+            Write-Host "🎯 Tự động phát hiện Workflow ID: $wfId"
+
+            Invoke-RestMethod -Uri "https://api.github.com/repos/${{ github.repository }}/actions/workflows/$wfId/dispatches" -Method Post -Headers $headers -Body $payload -TimeoutSec 30
             Write-Host "✅ Đã trigger phiên BetterGFN tiếp theo thành công!"
           } catch {
             Write-Warning "Lỗi trigger: $($_.Exception.Message)"
