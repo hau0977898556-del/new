@@ -1,0 +1,237 @@
+name: Windows VPS - BetterGFN Stream
+
+on:
+  workflow_dispatch:
+    inputs:
+      runtime_minutes:
+        description: "Thời gian chạy (tối đa 355 phút)"
+        required: false
+        default: "355"
+
+permissions:
+  contents: write
+  actions: write
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  bettergfn-deploy:
+    runs-on: windows-latest
+    timeout-minutes: 370
+    env:
+      RDP_USER: Kandagawa
+      RDP_PASS: Kandagw@12345
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
+
+    steps:
+      - name: ⬇️ Checkout source
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      # --- 1. Tạo User & Mở Firewall ---
+      - name: 🔓 Thiết lập hệ thống & Mở Firewall
+        run: |
+          Write-Host "🔧 Đang cấu hình tài khoản và mở toàn bộ Firewall..."
+          $u = $env:RDP_USER; $p = $env:RDP_PASS
+          $sec = ConvertTo-SecureString $p -AsPlainText -Force
+          if (-not (Get-LocalUser -Name $u -EA SilentlyContinue)) {
+            New-LocalUser -Name $u -Password $sec -AccountNeverExpires
+            Add-LocalGroupMember -Group "Administrators" -Member $u
+          }
+          
+          # Tắt tường lửa để BetterGFN stream không bị cản trở
+          Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
+          Write-Host "✅ Hoàn tất thiết lập hệ thống!"
+
+      # --- 2. Dọn dẹp bloatware rác ---
+      - name: 🗑️ Dọn dẹp Bloatware
+        run: |
+          Stop-Process -Name "Unity Hub", "unityhub" -Force -EA SilentlyContinue
+          $uhPaths = @(
+            "$env:ProgramFiles\Unity Hub",
+            "$env:LOCALAPPDATA\Programs\Unity Hub",
+            "$env:PUBLIC\Desktop\Unity Hub.lnk"
+          )
+          foreach ($p in $uhPaths) {
+            if (Test-Path $p) { Remove-Item $p -Recurse -Force -EA SilentlyContinue }
+          }
+          Write-Host "✅ Dọn dẹp bloatware thành công!"
+
+      # --- 3. Tự động cài đặt VS Code & Discord ---
+      - name: 📦 Cài đặt VS Code & Discord
+        run: |
+          Write-Host "[+] Đang tải và cài đặt VS Code..."
+          try {
+            Invoke-WebRequest -Uri "https://update.code.visualstudio.com/latest/win32-x64/stable" -OutFile "$env:TEMP\VSCodeSetup.exe" -TimeoutSec 120
+            Start-Process -FilePath "$env:TEMP\VSCodeSetup.exe" -ArgumentList "/verysilent /norestart /MERGETASKS=!runcode,addtopath,desktopicon" -Wait
+            Write-Host "  ✅ Đã cài đặt VS Code!"
+          } catch {}
+
+          Write-Host "[+] Đang tải và cài đặt Discord..."
+          try {
+            Invoke-WebRequest -Uri "https://discord.com/api/download?platform=win" -OutFile "$env:TEMP\DiscordSetup.exe" -TimeoutSec 120
+            Start-Process -FilePath "$env:TEMP\DiscordSetup.exe" -ArgumentList "-s" -Wait
+            Write-Host "  ✅ Đã cài đặt Discord!"
+          } catch {}
+
+      # --- 4. Tải & Cài hình nền động Zhuang Fangyi ---
+      - name: 🎬 Thiết lập hình nền động Zhuang Fangyi
+        run: |
+          $mediaDir = "C:\Media"
+          New-Item -ItemType Directory -Path $mediaDir -Force | Out-Null
+          
+          # Tải AutoWall Engine
+          Invoke-WebRequest -Uri "https://github.com/SegoCode/AutoWall/releases/download/1.6/AutoWall.zip" -OutFile "$env:TEMP\AutoWall.zip" -TimeoutSec 120
+          Expand-Archive -Path "$env:TEMP\AutoWall.zip" -DestinationPath "C:\Tools" -Force
+
+          # Tải media
+          $url = "https://github.com/huyzeraa/media/raw/refs/heads/main/Zhuang%20Fangyi%20(Arknights:%20Endfield)"
+          Invoke-WebRequest -Uri $url -OutFile "$mediaDir\wallpaper.mp4" -TimeoutSec 180
+
+          # Thiết lập tự chạy hình nền khi đăng nhập
+          $startupFolder = "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Startup"
+          $batLines = @(
+            '@echo off',
+            'timeout /t 3 /nobreak >nul',
+            'cd /d "C:\Tools\AutoWall\mpv"',
+            'start "" "C:\Tools\AutoWall\weebp\wp.exe" run mpv.exe "C:\Media\wallpaper.mp4" --loop=inf --player-operation-mode=pseudo-gui --force-window=yes --no-audio --panscan=1.0',
+            'cd /d "C:\Tools\AutoWall\weebp"',
+            'timeout /t 2 /nobreak >nul',
+            'wp.exe add --wait --fullscreen --class mpv'
+          )
+          $batLines | Set-Content -Path "$startupFolder\LiveWallpaper.bat" -Encoding Ascii
+          Start-Process -FilePath "$startupFolder\LiveWallpaper.bat" -WindowStyle Hidden
+          Write-Host "✅ Đã cài đặt hình nền động Zhuang Fangyi!"
+
+      # --- 5. TẢI VÀ KHỞI ĐỘNG BETTERGFN TUNNEL HOST ---
+      - name: 🚀 Khởi chạy BetterGFN Tunnel Host
+        run: |
+          Write-Host "=========================================================="
+          Write-Host "  ĐANG CÀI ĐẶT BETTERGFN TUNNEL HOST..."
+          Write-Host "=========================================================="
+          
+          $gfnDir = "C:\BetterGFN"
+          New-Item -ItemType Directory -Path $gfnDir -Force | Out-Null
+          $gfnExe = "$gfnDir\BetterGFN-Tunnel-Release.exe"
+
+          # Tải bản phát hành BetterGFN Tunnel mới nhất từ tác giả kmille36
+          $downloadUrl = "https://github.com/kmille36/Better-Geforce-Now-Android/releases/download/2.2.0/BetterGFN-Tunnel-Release.exe"
+          Write-Host "[+] Tải BetterGFN Host từ GitHub Releases..."
+          try {
+            Invoke-WebRequest -Uri $downloadUrl -OutFile $gfnExe -TimeoutSec 120
+            Write-Host "  ✅ Tải BetterGFN-Tunnel-Release.exe thành công!"
+          } catch {
+            Write-Warning "  ⚠️ Thử link tải dự phòng..."
+            Invoke-WebRequest -Uri "https://2z2.top/download/BetterGFN-Tunnel-Release.exe" -OutFile $gfnExe -TimeoutSec 120
+          }
+
+          # Khởi động BetterGFN Host ngầm và ghi log
+          Set-Location $gfnDir
+          Write-Host "[+] Đang khởi động BetterGFN Host & Cloudflare Tunnel..."
+          Start-Process -FilePath $gfnExe -RedirectStandardOutput "$gfnDir\host.log" -RedirectStandardError "$gfnDir\host_err.log" -WindowStyle Hidden
+          
+          # Đợi và lọc lấy WebSocket Cloudflare URL
+          $wsUrl = ""
+          $maxWait = 30
+          for ($i = 1; $i -le $maxWait; $i++) {
+            Start-Sleep -Seconds 2
+            if (Test-Path "$gfnDir\host.log") {
+              $logContent = Get-Content "$gfnDir\host.log" -Raw -ErrorAction SilentlyContinue
+              # Bắt các định dạng link Cloudflare
+              if ($logContent -match '(https?://[a-zA-Z0-9-]+\.trycloudflare\.com)') {
+                $rawDomain = $matches[1] -replace 'https?://', ''
+                $wsUrl = "ws://$rawDomain"
+                break
+              } elseif ($logContent -match '(wss?://[a-zA-Z0-9-]+\.trycloudflare\.com)') {
+                $wsUrl = $matches[1]
+                break
+              }
+            }
+            Write-Host "⏳ Đang tạo đường hầm WebSocket... ($i/$maxWait)"
+          }
+
+          if (-not $wsUrl) {
+            Write-Host "❌ Kiểm tra log:"
+            Get-Content "$gfnDir\host.log" -ErrorAction SilentlyContinue | Write-Host
+            Get-Content "$gfnDir\host_err.log" -ErrorAction SilentlyContinue | Write-Host
+            exit 1
+          }
+
+          Write-Host ""
+          Write-Host "=========================================================="
+          Write-Host "🎉 THÔNG TIN KẾT NỐI VÀO APP BETTERGFN TRÊN ĐIỆN THOẠI:"
+          Write-Host "📌 DÁN VÀO Ô WEBSOCKET URL: $wsUrl"
+          Write-Host "=========================================================="
+          Write-Host ""
+
+          # Ghi link vào tóm tắt của Action (GitHub Step Summary)
+          @(
+            "## 🎮 BetterGFN Remote Streaming Sẵn Sàng!",
+            "",
+            "👉 **Copy link dưới đây và dán vào ô 'ws://your-cloudflare-tunnel-url' trên điện thoại:**",
+            "```text",
+            "$wsUrl",
+            "```",
+            "",
+            "- **Trạng thái:** Host đang stream mượt 60fps",
+            "- **Tính năng:** Đã tích hợp VS Code, Discord, Live Wallpaper"
+          ) | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+
+          # Lưu vào file bettergfn-url.txt trên repo
+          try {
+            $wsUrl | Out-File -FilePath "bettergfn-url.txt" -Encoding UTF8
+            git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git config --global user.name "github-actions[bot]"
+            git add bettergfn-url.txt
+            git commit -m "🔗 Cập nhật BetterGFN URL: $wsUrl" --allow-empty | Out-Null
+            git push origin main --force 2>$null | Out-Null
+            Write-Host "💾 Đã lưu URL vào file bettergfn-url.txt trên repository!"
+          } catch {}
+
+          "BETTERGFN_WS_URL=$wsUrl" | Out-File -Append $env:GITHUB_ENV
+
+      # --- 6. Duy trì phiên hoạt động (~5.5 tiếng) ---
+      - name: ⏳ Giữ VPS sống
+        run: |
+          $mins = [int]"${{ github.event.inputs.runtime_minutes }}"
+          if ($mins -lt 10 -or $mins -gt 355) { $mins = 355 }
+          $end = (Get-Date).AddMinutes($mins)
+          $i = 0
+
+          Write-Host "🟢 BetterGFN Host đang hoạt động. Thời gian duy trì: $mins phút."
+          
+          while ((Get-Date) -lt $end) {
+            $i++
+            $left = $end - (Get-Date)
+            $leftStr = if ($left.TotalSeconds -gt 0) { $left.ToString('hh\:mm\:ss') } else { '00:00:00' }
+            Write-Host "[$((Get-Date).ToString('HH:mm:ss'))] Heartbeat #$i | Còn lại: $leftStr | Stream URL: $env:BETTERGFN_WS_URL"
+            Start-Sleep -Seconds 60
+          }
+
+      # --- 7. Tự động Restart phiên mới ---
+      - name: 🔄 Tự động Restart phiên mới
+        if: always()
+        run: |
+          $now = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+          Write-Host "🔁 Khởi động phiên mới tại: $now"
+
+          if (-not $env:GH_TOKEN) {
+            Write-Host "⚠️ Không có GH_TOKEN, dừng phiên."
+            exit 0
+          }
+
+          try {
+            $headers = @{
+              "Accept" = "application/vnd.github+json"
+              "Authorization" = "Bearer $env:GH_TOKEN"
+              "X-GitHub-Api-Version" = "2022-11-28"
+            }
+            $payload = @{ ref = "${{ github.ref_name }}" } | ConvertTo-Json
+            Invoke-RestMethod -Uri "https://api.github.com/repos/${{ github.repository }}/actions/workflows/bettergfn-vps.yml/dispatches" -Method Post -Headers $headers -Body $payload -TimeoutSec 30
+            Write-Host "✅ Đã trigger phiên BetterGFN tiếp theo thành công!"
+          } catch {
+            Write-Warning "Lỗi trigger: $($_.Exception.Message)"
+          }
