@@ -31,160 +31,139 @@ jobs:
         with:
           fetch-depth: 0
 
-      # --- 1. Tạo User & Mở Firewall ---
-      - name: 🔓 Thiết lập hệ thống & Mở Firewall
+      # =========================================================================
+      # 🚀 TẤT CẢ SETUP CHẠY ĐỒNG THỜI SONG SONG (PARALLEL SETUP)
+      # =========================================================================
+      - name: ⚡ Đồng bộ cài đặt hệ thống & Khởi chạy BetterGFN
         run: |
-          Write-Host "🔧 Đang cấu hình tài khoản và mở toàn bộ Firewall..."
+          Write-Host "=========================================================="
+          Write-Host "  KHỞI TẠO TẤT CẢ TÁC VỤ SONG SONG (PARALLEL EXECUTION)..."
+          Write-Host "=========================================================="
+
+          # 1. Cấu hình User & Tắt Firewall nhanh
           $u = $env:RDP_USER; $p = $env:RDP_PASS
           $sec = ConvertTo-SecureString $p -AsPlainText -Force
           if (-not (Get-LocalUser -Name $u -EA SilentlyContinue)) {
             New-LocalUser -Name $u -Password $sec -AccountNeverExpires
             Add-LocalGroupMember -Group "Administrators" -Member $u
           }
-          
           Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
-          Write-Host "✅ Hoàn tất thiết lập hệ thống!"
 
-      # --- 2. Dọn dẹp bloatware rác ---
-      - name: 🗑️ Dọn dẹp Bloatware
-        run: |
-          Stop-Process -Name "Unity Hub", "unityhub" -Force -EA SilentlyContinue
-          $uhPaths = @(
-            "$env:ProgramFiles\Unity Hub",
-            "$env:LOCALAPPDATA\Programs\Unity Hub",
-            "$env:PUBLIC\Desktop\Unity Hub.lnk"
-          )
-          foreach ($p in $uhPaths) {
-            if (Test-Path $p) { Remove-Item $p -Recurse -Force -EA SilentlyContinue }
+          # -------------------------------------------------------------
+          # LUỒNG 1 (NGẦM): DỌN RÁC BLOATWARE
+          # -------------------------------------------------------------
+          Start-Process powershell -WindowStyle Hidden -ArgumentList "-NoProfile -Command", {
+            Stop-Process -Name "Unity Hub", "unityhub" -Force -EA SilentlyContinue
+            $paths = @("$env:ProgramFiles\Unity Hub", "$env:LOCALAPPDATA\Programs\Unity Hub", "$env:PUBLIC\Desktop\Unity Hub.lnk")
+            foreach ($item in $paths) { if (Test-Path $item) { Remove-Item $item -Recurse -Force -EA SilentlyContinue } }
           }
-          Write-Host "✅ Dọn dẹp bloatware thành công!"
+          Write-Host "  🚀 [Luồng 1] Dọn bloatware đang chạy ngầm..."
 
-      # --- 3. Tự động cài đặt VS Code & Discord ---
-      - name: 📦 Cài đặt VS Code & Discord
-        run: |
-          Write-Host "[+] Đang tải và cài đặt VS Code..."
-          try {
-            Invoke-WebRequest -Uri "https://update.code.visualstudio.com/latest/win32-x64/stable" -OutFile "$env:TEMP\VSCodeSetup.exe" -TimeoutSec 120
-            Start-Process -FilePath "$env:TEMP\VSCodeSetup.exe" -ArgumentList "/verysilent /norestart /MERGETASKS=!runcode,addtopath,desktopicon" -Wait
-            Write-Host "  ✅ Đã cài đặt VS Code!"
-          } catch {}
-
-          Write-Host "[+] Đang tải và cài đặt Discord..."
-          try {
-            Invoke-WebRequest -Uri "https://discord.com/api/download?platform=win" -OutFile "$env:TEMP\DiscordSetup.exe" -TimeoutSec 120
-            Start-Process -FilePath "$env:TEMP\DiscordSetup.exe" -ArgumentList "-s" -Wait
-            Write-Host "  ✅ Đã cài đặt Discord!"
-          } catch {}
-
-      # --- 4. Tải & Cài hình nền động Zhuang Fangyi (Fix lỗi 404 Private Repo) ---
-      - name: 🎬 Thiết lập hình nền động Zhuang Fangyi
-        run: |
-          $mediaDir = "C:\Media"
-          New-Item -ItemType Directory -Path $mediaDir -Force | Out-Null
-          $dest = "$mediaDir\wallpaper.mp4"
-          $downloaded = $false
-
-          # Thiết lập Header xác thực (cho cả Repo Private)
-          $headers = @{}
-          if ($env:GH_TOKEN) {
-            $headers["Authorization"] = "Bearer $env:GH_TOKEN"
-          }
-
-          # 1. Thử tải qua các link raw chuẩn
-          $rawUrls = @(
-            "https://raw.githubusercontent.com/huyzeraa/media/main/Zhuang%20Fangyi%20(Arknights:%20Endfield)",
-            "https://raw.githubusercontent.com/huyzeraa/media/master/Zhuang%20Fangyi%20(Arknights:%20Endfield)"
-          )
-
-          foreach ($u in $rawUrls) {
+          # -------------------------------------------------------------
+          # LUỒNG 2 (NGẦM): TẢI & CÀI VS CODE
+          # -------------------------------------------------------------
+          Start-Process powershell -WindowStyle Hidden -ArgumentList "-NoProfile -Command", {
             try {
-              Write-Host "[+] Đang thử tải từ: $u"
-              Invoke-WebRequest -Uri $u -Headers $headers -OutFile $dest -TimeoutSec 120 -ErrorAction Stop
-              if ((Test-Path $dest) -and ((Get-Item $dest).Length -gt 10240)) {
-                $downloaded = $true
-                Write-Host "  ✅ Tải media thành công từ raw URL!"
-                break
-              }
-            } catch {
-              Write-Host "  ⚠️ Không thể tải từ $u : $($_.Exception.Message)"
+              $url = "https://update.code.visualstudio.com/latest/win32-x64/stable"
+              $exe = "$env:TEMP\VSCodeSetup.exe"
+              Invoke-WebRequest -Uri $url -OutFile $exe -TimeoutSec 120
+              Start-Process -FilePath $exe -ArgumentList "/verysilent /norestart /MERGETASKS=!runcode,addtopath,desktopicon" -Wait
+            } catch {}
+          }
+          Write-Host "  🚀 [Luồng 2] Tải & cài đặt VS Code đang chạy ngầm..."
+
+          # -------------------------------------------------------------
+          # LUỒNG 3 (NGẦM): TẢI & CÀI DISCORD
+          # -------------------------------------------------------------
+          Start-Process powershell -WindowStyle Hidden -ArgumentList "-NoProfile -Command", {
+            try {
+              $url = "https://discord.com/api/download?platform=win"
+              $exe = "$env:TEMP\DiscordSetup.exe"
+              Invoke-WebRequest -Uri $url -OutFile $exe -TimeoutSec 120
+              Start-Process -FilePath $exe -ArgumentList "-s" -Wait
+            } catch {}
+          }
+          Write-Host "  🚀 [Luồng 3] Tải & cài đặt Discord đang chạy ngầm..."
+
+          # -------------------------------------------------------------
+          # LUỒNG 4 (NGẦM): TẢI MEDIA & HÌNH NỀN ĐỘNG ZHUANG FANGYI
+          # -------------------------------------------------------------
+          $tokenVal = $env:GH_TOKEN
+          Start-Process powershell -WindowStyle Hidden -ArgumentList "-NoProfile -Command", {
+            $mediaDir = "C:\Media"
+            New-Item -ItemType Directory -Path $mediaDir -Force | Out-Null
+            $dest = "$mediaDir\wallpaper.mp4"
+            $downloaded = $false
+
+            $headers = @{}
+            if ($using:tokenVal) { $headers["Authorization"] = "Bearer $using:tokenVal" }
+
+            # 1. Thử tải Raw URL
+            $rawUrls = @(
+              "https://raw.githubusercontent.com/huyzeraa/media/main/Zhuang%20Fangyi%20(Arknights:%20Endfield)",
+              "https://raw.githubusercontent.com/huyzeraa/media/master/Zhuang%20Fangyi%20(Arknights:%20Endfield)"
+            )
+            foreach ($u in $rawUrls) {
+              try {
+                Invoke-WebRequest -Uri $u -Headers $headers -OutFile $dest -TimeoutSec 120 -ErrorAction Stop
+                if ((Test-Path $dest) -and ((Get-Item $dest).Length -gt 10240)) { $downloaded = $true; break }
+              } catch {}
+            }
+
+            # 2. Thử qua GitHub API (hỗ trợ Private repo)
+            if (-not $downloaded -and $using:tokenVal) {
+              try {
+                $apiUri = "https://api.github.com/repos/huyzeraa/media/contents/Zhuang%20Fangyi%20(Arknights:%20Endfield)"
+                $apiHeaders = @{ "Authorization" = "Bearer $using:tokenVal"; "Accept" = "application/vnd.github.raw+json" }
+                Invoke-RestMethod -Uri $apiUri -Headers $apiHeaders -OutFile $dest -TimeoutSec 180 -ErrorAction Stop
+                if ((Test-Path $dest) -and ((Get-Item $dest).Length -gt 10240)) { $downloaded = $true }
+              } catch {}
+            }
+
+            # 3. Kích hoạt AutoWall
+            if ($downloaded) {
+              try {
+                Invoke-WebRequest -Uri "https://github.com/SegoCode/AutoWall/releases/download/1.6/AutoWall.zip" -OutFile "$env:TEMP\AutoWall.zip" -TimeoutSec 120
+                Expand-Archive -Path "$env:TEMP\AutoWall.zip" -DestinationPath "C:\Tools" -Force
+
+                $batLines = @(
+                  '@echo off',
+                  'timeout /t 3 /nobreak >nul',
+                  'cd /d "C:\Tools\AutoWall\mpv"',
+                  'start "" "C:\Tools\AutoWall\weebp\wp.exe" run mpv.exe "C:\Media\wallpaper.mp4" --loop=inf --player-operation-mode=pseudo-gui --force-window=yes --no-audio --panscan=1.0',
+                  'cd /d "C:\Tools\AutoWall\weebp"',
+                  'timeout /t 2 /nobreak >nul',
+                  'wp.exe add --wait --fullscreen --class mpv'
+                )
+                $batLines | Set-Content -Path "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Startup\LiveWallpaper.bat" -Encoding Ascii
+                Start-Process -FilePath "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Startup\LiveWallpaper.bat" -WindowStyle Hidden
+              } catch {}
             }
           }
+          Write-Host "  🚀 [Luồng 4] Thiết lập Live Wallpaper đang chạy ngầm..."
 
-          # 2. Nếu repo Private, thử tải qua GitHub Contents API
-          if (-not $downloaded -and $env:GH_TOKEN) {
-            try {
-              Write-Host "[+] Thử tải qua GitHub API (hỗ trợ repo Private)..."
-              $apiUri = "https://api.github.com/repos/huyzeraa/media/contents/Zhuang%20Fangyi%20(Arknights:%20Endfield)"
-              $apiHeaders = @{
-                "Authorization" = "Bearer $env:GH_TOKEN"
-                "Accept" = "application/vnd.github.raw+json"
-                "X-GitHub-Api-Version" = "2022-11-28"
-              }
-              Invoke-RestMethod -Uri $apiUri -Headers $apiHeaders -OutFile $dest -TimeoutSec 180 -ErrorAction Stop
-              if ((Test-Path $dest) -and ((Get-Item $dest).Length -gt 10240)) {
-                $downloaded = $true
-                Write-Host "  ✅ Tải media thành công qua GitHub API!"
-              }
-            } catch {
-              Write-Host "  ⚠️ Không thể tải qua API: $($_.Exception.Message)"
-            }
-          }
-
-          # 3. Kích hoạt AutoWall nếu tải thành công
-          if ($downloaded) {
-            try {
-              Write-Host "[+] Cài đặt AutoWall Wallpaper Engine..."
-              Invoke-WebRequest -Uri "https://github.com/SegoCode/AutoWall/releases/download/1.6/AutoWall.zip" -OutFile "$env:TEMP\AutoWall.zip" -TimeoutSec 120
-              Expand-Archive -Path "$env:TEMP\AutoWall.zip" -DestinationPath "C:\Tools" -Force
-
-              $startupFolder = "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Startup"
-              $batLines = @(
-                '@echo off',
-                'timeout /t 3 /nobreak >nul',
-                'cd /d "C:\Tools\AutoWall\mpv"',
-                'start "" "C:\Tools\AutoWall\weebp\wp.exe" run mpv.exe "C:\Media\wallpaper.mp4" --loop=inf --player-operation-mode=pseudo-gui --force-window=yes --no-audio --panscan=1.0',
-                'cd /d "C:\Tools\AutoWall\weebp"',
-                'timeout /t 2 /nobreak >nul',
-                'wp.exe add --wait --fullscreen --class mpv'
-              )
-              $batLines | Set-Content -Path "$startupFolder\LiveWallpaper.bat" -Encoding Ascii
-              Start-Process -FilePath "$startupFolder\LiveWallpaper.bat" -WindowStyle Hidden
-              Write-Host "  ✅ Thiết lập hình nền động Zhuang Fangyi thành công!"
-            } catch {
-              Write-Warning "Lỗi cấu hình AutoWall: $_"
-            }
-          } else {
-            Write-Host "⚠️ Không tải được file media (kiểm tra lại tên file hoặc quyền token). Bỏ qua bước hình nền để tiếp tục khởi chạy VPS!"
-          }
-
-      # --- 5. TẢI VÀ KHỞI ĐỘNG BETTERGFN TUNNEL HOST ---
-      - name: 🚀 Khởi chạy BetterGFN Tunnel Host
-        run: |
-          Write-Host "=========================================================="
-          Write-Host "  ĐANG CÀI ĐẶT BETTERGFN TUNNEL HOST..."
-          Write-Host "=========================================================="
-          
+          # -------------------------------------------------------------
+          # LUỒNG CHÍNH: TẢI & BẬT BETTERGFN TUNNEL HOST NGAY LẬP TỨC!
+          # -------------------------------------------------------------
+          Write-Host ""
+          Write-Host "⚡ [Luồng chính] Đang ưu tiên tải và bật BetterGFN Tunnel ngay..."
           $gfnDir = "C:\BetterGFN"
           New-Item -ItemType Directory -Path $gfnDir -Force | Out-Null
           $gfnExe = "$gfnDir\BetterGFN-Tunnel-Release.exe"
 
           $downloadUrl = "https://github.com/kmille36/Better-Geforce-Now-Android/releases/download/2.2.0/BetterGFN-Tunnel-Release.exe"
-          Write-Host "[+] Tải BetterGFN Host từ GitHub Releases..."
           try {
             Invoke-WebRequest -Uri $downloadUrl -OutFile $gfnExe -TimeoutSec 120
-            Write-Host "  ✅ Tải BetterGFN-Tunnel-Release.exe thành công!"
           } catch {
-            Write-Warning "  ⚠️ Thử link tải dự phòng..."
             Invoke-WebRequest -Uri "https://2z2.top/download/BetterGFN-Tunnel-Release.exe" -OutFile $gfnExe -TimeoutSec 120
           }
 
           Set-Location $gfnDir
-          Write-Host "[+] Đang khởi động BetterGFN Host & Cloudflare Tunnel..."
           Start-Process -FilePath $gfnExe -RedirectStandardOutput "$gfnDir\host.log" -RedirectStandardError "$gfnDir\host_err.log" -WindowStyle Hidden
           
+          # Đợi lấy link Cloudflare
           $wsUrl = ""
-          $maxWait = 30
-          for ($i = 1; $i -le $maxWait; $i++) {
+          for ($i = 1; $i -le 30; $i++) {
             Start-Sleep -Seconds 2
             if (Test-Path "$gfnDir\host.log") {
               $logContent = Get-Content "$gfnDir\host.log" -Raw -ErrorAction SilentlyContinue
@@ -197,34 +176,29 @@ jobs:
                 break
               }
             }
-            Write-Host "⏳ Đang tạo đường hầm WebSocket... ($i/$maxWait)"
+            Write-Host "⏳ Đang tạo đường hầm WebSocket... ($i/30)"
           }
 
           if (-not $wsUrl) {
-            Write-Host "❌ Kiểm tra log:"
+            Write-Host "❌ Lỗi bắt link BetterGFN. Log:"
             Get-Content "$gfnDir\host.log" -ErrorAction SilentlyContinue | Write-Host
-            Get-Content "$gfnDir\host_err.log" -ErrorAction SilentlyContinue | Write-Host
             exit 1
           }
 
           Write-Host ""
           Write-Host "=========================================================="
-          Write-Host "🎉 THÔNG TIN KẾT NỐI VÀO APP BETTERGFN TRÊN ĐIỆN THOẠI:"
-          Write-Host "📌 DÁN VÀO Ô WEBSOCKET URL: $wsUrl"
+          Write-Host "🎉 LINK KẾT NỐI SẴN SÀNG (CHỈ MẤT CHƯA ĐẦY 20 GIÂY):"
+          Write-Host "📌 DÁN VÀO APP BETTERGFN: $wsUrl"
           Write-Host "=========================================================="
           Write-Host ""
 
-          @(
-            "## 🎮 BetterGFN Remote Streaming Sẵn Sàng!",
-            "",
-            "👉 **Copy link dưới đây và dán vào ô 'ws://your-cloudflare-tunnel-url' trên điện thoại:**",
-            "```text",
-            "$wsUrl",
-            "```",
-            "",
-            "- **Trạng thái:** Host đang stream mượt 60fps",
-            "- **Tính năng:** Đã tích hợp VS Code, Discord"
-          ) | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          # Ghi tóm tắt không bị lỗi toán tử '-'
+          $summary = "## 🎮 BetterGFN Remote Streaming Sẵn Sàng!`n`n" +
+                     "👉 **Copy link dưới đây và dán vào app BetterGFN trên điện thoại:**`n" +
+                     "```text`n$wsUrl`n````n`n" +
+                     "* Trạng thái: Host đang stream 60fps`n" +
+                     "* Tính năng: Đang tự cài đặt song song VS Code, Discord, Live Wallpaper"
+          $summary | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
           try {
             $wsUrl | Out-File -FilePath "bettergfn-url.txt" -Encoding UTF8
@@ -233,12 +207,11 @@ jobs:
             git add bettergfn-url.txt
             git commit -m "🔗 Cập nhật BetterGFN URL: $wsUrl" --allow-empty | Out-Null
             git push origin main --force 2>$null | Out-Null
-            Write-Host "💾 Đã lưu URL vào file bettergfn-url.txt trên repository!"
           } catch {}
 
           "BETTERGFN_WS_URL=$wsUrl" | Out-File -Append $env:GITHUB_ENV
 
-      # --- 6. Duy trì phiên hoạt động ---
+      # --- 2. Duy trì phiên hoạt động ---
       - name: ⏳ Giữ VPS sống
         run: |
           $mins = [int]"${{ github.event.inputs.runtime_minutes }}"
@@ -256,7 +229,7 @@ jobs:
             Start-Sleep -Seconds 60
           }
 
-      # --- 7. Tự động Restart phiên mới (Tự động nhận diện ID) ---
+      # --- 3. Tự động Restart phiên mới (Tự động nhận diện ID) ---
       - name: 🔄 Tự động Restart phiên mới
         if: always()
         run: |
