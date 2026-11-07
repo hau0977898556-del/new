@@ -44,27 +44,38 @@ jobs:
           Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
           Write-Host "✅ Hoàn tất cấu hình hệ thống!"
 
-      # --- 2. Cài đặt Sunshine (Nguồn Stream 47989 cho BetterGFN) ---
+      # --- 2. Cài đặt Sunshine bằng file MSI chính xác ---
       - name: ☀️ Cài đặt Sunshine Stream Host (Port 47989)
         run: |
-          Write-Host "📥 Đang tải Sunshine (Moonlight Host)..."
-          $sunshineUrl = "https://github.com/LizardByte/Sunshine/releases/latest/download/sunshine-windows-installer.exe"
-          Invoke-WebRequest -Uri $sunshineUrl -OutFile "$env:TEMP\sunshine.exe" -TimeoutSec 180
+          Write-Host "📥 Đang tải Sunshine MSI..."
+          $sunshineUrl = "https://github.com/LizardByte/Sunshine/releases/download/v2026.1106.201906/Sunshine-Windows-AMD64-installer.msi"
+          $msiPath = "$env:TEMP\Sunshine-installer.msi"
+          Invoke-WebRequest -Uri $sunshineUrl -OutFile $msiPath -TimeoutSec 180
 
-          Write-Host "🚀 Đang cài đặt Sunshine ngầm..."
-          Start-Process -FilePath "$env:TEMP\sunshine.exe" -ArgumentList "/S" -Wait
+          Write-Host "🚀 Đang cài đặt Sunshine ngầm qua msiexec..."
+          Start-Process msiexec.exe -Wait -ArgumentList "/i `"$msiPath`" /quiet /norestart"
           Start-Sleep -Seconds 5
 
-          # Khởi động Sunshine Service
-          Write-Host "⚡ Khởi chạy Sunshine..."
-          $sunshineExe = "C:\Program Files\LizardByte\Sunshine\sunshine.exe"
-          if (Test-Path $sunshineExe) {
+          # Tìm đường dẫn thực thi của sunshine.exe
+          $sunshinePaths = @(
+            "C:\Program Files\Sunshine\sunshine.exe",
+            "C:\Program Files\LizardByte\Sunshine\sunshine.exe"
+          )
+          $sunshineExe = $sunshinePaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+          if (-not $sunshineExe) {
+            $found = Get-ChildItem -Path "C:\Program Files" -Filter "sunshine.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) { $sunshineExe = $found.FullName }
+          }
+
+          if ($sunshineExe) {
+            Write-Host "⚡ Khởi chạy Sunshine tại: $sunshineExe"
             Start-Process -FilePath $sunshineExe -WindowStyle Hidden
           } else {
-            # Thử qua winget nếu installer đổi path
-            winget install LizardByte.Sunshine --accept-source-agreements --accept-package-agreements --silent
-            Start-Process -FilePath "C:\Program Files\Sunshine\sunshine.exe" -WindowStyle Hidden -ErrorAction SilentlyContinue
+            Write-Host "⚠️ Thử chạy lệnh sunshine trực tiếp..."
+            Start-Process -FilePath "sunshine" -WindowStyle Hidden -ErrorAction SilentlyContinue
           }
+
           Start-Sleep -Seconds 8
           Write-Host "✅ Sunshine đã hoạt động trên cổng 47989!"
 
@@ -102,7 +113,7 @@ jobs:
             Invoke-WebRequest -Uri "https://2z2.top/download/BetterGFN-Tunnel-Release.exe" -OutFile $gfnExe -TimeoutSec 120
           }
 
-          # Chạy BetterGFN Host (nối với Sunshine 47989 và mở web port 8080)
+          # Chạy BetterGFN Host kết nối với Sunshine 47989
           Set-Location $gfnDir
           Start-Process -FilePath $gfnExe -RedirectStandardOutput "$gfnDir\host.log" -RedirectStandardError "$gfnDir\host_err.log" -WindowStyle Hidden
           Start-Sleep -Seconds 6
@@ -175,7 +186,7 @@ jobs:
             Start-Sleep -Seconds 60
           }
 
-      # --- 6. Tự động Restart phiên mới ---
+      # --- 6. Tự động Restart phiên mới (Tự nhận diện Workflow ID) ---
       - name: 🔄 Tự động Restart phiên mới
         if: always()
         run: |
