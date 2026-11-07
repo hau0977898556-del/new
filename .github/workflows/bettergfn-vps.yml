@@ -6,7 +6,7 @@ on:
       runtime_minutes:
         description: "Thời gian chạy (tối đa 355 phút)"
         required: false
-        default: "355"
+        default: "350"
 
 permissions:
   contents: write
