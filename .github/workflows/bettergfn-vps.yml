@@ -1,4 +1,4 @@
-name: Windows VPS - BetterGFN Stream
+name: Windows VPS - BetterGFN with Sunshine
 
 on:
   workflow_dispatch:
@@ -31,16 +31,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      # =========================================================================
-      # 🚀 TẤT CẢ SETUP CHẠY ĐỒNG THỜI SONG SONG (PARALLEL SETUP)
-      # =========================================================================
-      - name: ⚡ Đồng bộ cài đặt hệ thống & Khởi chạy BetterGFN
+      # --- 1. Tạo User & Mở Firewall ---
+      - name: 🔓 Cấu hình hệ thống & Firewall
         run: |
-          Write-Host "=========================================================="
-          Write-Host "  KHỞI TẠO TẤT CẢ TÁC VỤ SONG SONG (PARALLEL EXECUTION)..."
-          Write-Host "=========================================================="
-
-          # 1. Cấu hình User & Tắt Firewall nhanh
+          Write-Host "🔧 Cấu hình User và tắt Firewall..."
           $u = $env:RDP_USER; $p = $env:RDP_PASS
           $sec = ConvertTo-SecureString $p -AsPlainText -Force
           if (-not (Get-LocalUser -Name $u -EA SilentlyContinue)) {
@@ -48,109 +42,59 @@ jobs:
             Add-LocalGroupMember -Group "Administrators" -Member $u
           }
           Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
+          Write-Host "✅ Hoàn tất cấu hình hệ thống!"
 
-          # -------------------------------------------------------------
-          # LUỒNG 1 (NGẦM): DỌN RÁC BLOATWARE
-          # -------------------------------------------------------------
-          Start-Process powershell -WindowStyle Hidden -ArgumentList "-NoProfile -Command", {
-            Stop-Process -Name "Unity Hub", "unityhub" -Force -EA SilentlyContinue
-            $paths = @("$env:ProgramFiles\Unity Hub", "$env:LOCALAPPDATA\Programs\Unity Hub", "$env:PUBLIC\Desktop\Unity Hub.lnk")
-            foreach ($item in $paths) { if (Test-Path $item) { Remove-Item $item -Recurse -Force -EA SilentlyContinue } }
+      # --- 2. Cài đặt Sunshine (Nguồn Stream 47989 cho BetterGFN) ---
+      - name: ☀️ Cài đặt Sunshine Stream Host (Port 47989)
+        run: |
+          Write-Host "📥 Đang tải Sunshine (Moonlight Host)..."
+          $sunshineUrl = "https://github.com/LizardByte/Sunshine/releases/latest/download/sunshine-windows-installer.exe"
+          Invoke-WebRequest -Uri $sunshineUrl -OutFile "$env:TEMP\sunshine.exe" -TimeoutSec 180
+
+          Write-Host "🚀 Đang cài đặt Sunshine ngầm..."
+          Start-Process -FilePath "$env:TEMP\sunshine.exe" -ArgumentList "/S" -Wait
+          Start-Sleep -Seconds 5
+
+          # Khởi động Sunshine Service
+          Write-Host "⚡ Khởi chạy Sunshine..."
+          $sunshineExe = "C:\Program Files\LizardByte\Sunshine\sunshine.exe"
+          if (Test-Path $sunshineExe) {
+            Start-Process -FilePath $sunshineExe -WindowStyle Hidden
+          } else {
+            # Thử qua winget nếu installer đổi path
+            winget install LizardByte.Sunshine --accept-source-agreements --accept-package-agreements --silent
+            Start-Process -FilePath "C:\Program Files\Sunshine\sunshine.exe" -WindowStyle Hidden -ErrorAction SilentlyContinue
           }
-          Write-Host "  🚀 [Luồng 1] Dọn bloatware đang chạy ngầm..."
+          Start-Sleep -Seconds 8
+          Write-Host "✅ Sunshine đã hoạt động trên cổng 47989!"
 
-          # -------------------------------------------------------------
-          # LUỒNG 2 (NGẦM): TẢI & CÀI VS CODE
-          # -------------------------------------------------------------
+      # --- 3. Cài đặt các ứng dụng song song ngầm ---
+      - name: ⚡ Cài đặt VS Code & Discord ngầm
+        run: |
           Start-Process powershell -WindowStyle Hidden -ArgumentList "-NoProfile -Command", {
             try {
-              $url = "https://update.code.visualstudio.com/latest/win32-x64/stable"
-              $exe = "$env:TEMP\VSCodeSetup.exe"
-              Invoke-WebRequest -Uri $url -OutFile $exe -TimeoutSec 120
-              Start-Process -FilePath $exe -ArgumentList "/verysilent /norestart /MERGETASKS=!runcode,addtopath,desktopicon" -Wait
+              Invoke-WebRequest -Uri "https://update.code.visualstudio.com/latest/win32-x64/stable" -OutFile "$env:TEMP\VSCode.exe" -TimeoutSec 120
+              Start-Process -FilePath "$env:TEMP\VSCode.exe" -ArgumentList "/verysilent /norestart /MERGETASKS=!runcode,addtopath,desktopicon" -Wait
             } catch {}
-          }
-          Write-Host "  🚀 [Luồng 2] Tải & cài đặt VS Code đang chạy ngầm..."
-
-          # -------------------------------------------------------------
-          # LUỒNG 3 (NGẦM): TẢI & CÀI DISCORD
-          # -------------------------------------------------------------
-          Start-Process powershell -WindowStyle Hidden -ArgumentList "-NoProfile -Command", {
             try {
-              $url = "https://discord.com/api/download?platform=win"
-              $exe = "$env:TEMP\DiscordSetup.exe"
-              Invoke-WebRequest -Uri $url -OutFile $exe -TimeoutSec 120
-              Start-Process -FilePath $exe -ArgumentList "-s" -Wait
+              Invoke-WebRequest -Uri "https://discord.com/api/download?platform=win" -OutFile "$env:TEMP\Discord.exe" -TimeoutSec 120
+              Start-Process -FilePath "$env:TEMP\Discord.exe" -ArgumentList "-s" -Wait
             } catch {}
           }
-          Write-Host "  🚀 [Luồng 3] Tải & cài đặt Discord đang chạy ngầm..."
+          Write-Host "✅ VS Code & Discord đang cài đặt ngầm..."
 
-          # -------------------------------------------------------------
-          # LUỒNG 4 (NGẦM): TẢI MEDIA & HÌNH NỀN ĐỘNG ZHUANG FANGYI
-          # -------------------------------------------------------------
-          $tokenVal = $env:GH_TOKEN
-          Start-Process powershell -WindowStyle Hidden -ArgumentList "-NoProfile -Command", {
-            $mediaDir = "C:\Media"
-            New-Item -ItemType Directory -Path $mediaDir -Force | Out-Null
-            $dest = "$mediaDir\wallpaper.mp4"
-            $downloaded = $false
+      # --- 4. Khởi chạy BetterGFN Tunnel Host & Cloudflare ---
+      - name: 🚀 Khởi chạy BetterGFN Tunnel & Cloudflare
+        run: |
+          Write-Host "=========================================================="
+          Write-Host "  KHỞI ĐỘNG BETTERGFN TUNNEL HOST..."
+          Write-Host "=========================================================="
 
-            $headers = @{}
-            if ($using:tokenVal) { $headers["Authorization"] = "Bearer $using:tokenVal" }
-
-            # 1. Thử tải Raw URL
-            $rawUrls = @(
-              "https://raw.githubusercontent.com/huyzeraa/media/main/Zhuang%20Fangyi%20(Arknights:%20Endfield)",
-              "https://raw.githubusercontent.com/huyzeraa/media/master/Zhuang%20Fangyi%20(Arknights:%20Endfield)"
-            )
-            foreach ($u in $rawUrls) {
-              try {
-                Invoke-WebRequest -Uri $u -Headers $headers -OutFile $dest -TimeoutSec 120 -ErrorAction Stop
-                if ((Test-Path $dest) -and ((Get-Item $dest).Length -gt 10240)) { $downloaded = $true; break }
-              } catch {}
-            }
-
-            # 2. Thử qua GitHub API (hỗ trợ Private repo)
-            if (-not $downloaded -and $using:tokenVal) {
-              try {
-                $apiUri = "https://api.github.com/repos/huyzeraa/media/contents/Zhuang%20Fangyi%20(Arknights:%20Endfield)"
-                $apiHeaders = @{ "Authorization" = "Bearer $using:tokenVal"; "Accept" = "application/vnd.github.raw+json" }
-                Invoke-RestMethod -Uri $apiUri -Headers $apiHeaders -OutFile $dest -TimeoutSec 180 -ErrorAction Stop
-                if ((Test-Path $dest) -and ((Get-Item $dest).Length -gt 10240)) { $downloaded = $true }
-              } catch {}
-            }
-
-            # 3. Kích hoạt AutoWall
-            if ($downloaded) {
-              try {
-                Invoke-WebRequest -Uri "https://github.com/SegoCode/AutoWall/releases/download/1.6/AutoWall.zip" -OutFile "$env:TEMP\AutoWall.zip" -TimeoutSec 120
-                Expand-Archive -Path "$env:TEMP\AutoWall.zip" -DestinationPath "C:\Tools" -Force
-
-                $batLines = @(
-                  '@echo off',
-                  'timeout /t 3 /nobreak >nul',
-                  'cd /d "C:\Tools\AutoWall\mpv"',
-                  'start "" "C:\Tools\AutoWall\weebp\wp.exe" run mpv.exe "C:\Media\wallpaper.mp4" --loop=inf --player-operation-mode=pseudo-gui --force-window=yes --no-audio --panscan=1.0',
-                  'cd /d "C:\Tools\AutoWall\weebp"',
-                  'timeout /t 2 /nobreak >nul',
-                  'wp.exe add --wait --fullscreen --class mpv'
-                )
-                $batLines | Set-Content -Path "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Startup\LiveWallpaper.bat" -Encoding Ascii
-                Start-Process -FilePath "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Startup\LiveWallpaper.bat" -WindowStyle Hidden
-              } catch {}
-            }
-          }
-          Write-Host "  🚀 [Luồng 4] Thiết lập Live Wallpaper đang chạy ngầm..."
-
-          # -------------------------------------------------------------
-          # LUỒNG CHÍNH: TẢI & BẬT BETTERGFN TUNNEL HOST NGAY LẬP TỨC!
-          # -------------------------------------------------------------
-          Write-Host ""
-          Write-Host "⚡ [Luồng chính] Đang ưu tiên tải và bật BetterGFN Tunnel ngay..."
           $gfnDir = "C:\BetterGFN"
           New-Item -ItemType Directory -Path $gfnDir -Force | Out-Null
           $gfnExe = "$gfnDir\BetterGFN-Tunnel-Release.exe"
 
+          # Tải BetterGFN Host
           $downloadUrl = "https://github.com/kmille36/Better-Geforce-Now-Android/releases/download/2.2.0/BetterGFN-Tunnel-Release.exe"
           try {
             Invoke-WebRequest -Uri $downloadUrl -OutFile $gfnExe -TimeoutSec 120
@@ -158,46 +102,48 @@ jobs:
             Invoke-WebRequest -Uri "https://2z2.top/download/BetterGFN-Tunnel-Release.exe" -OutFile $gfnExe -TimeoutSec 120
           }
 
+          # Chạy BetterGFN Host (nối với Sunshine 47989 và mở web port 8080)
           Set-Location $gfnDir
           Start-Process -FilePath $gfnExe -RedirectStandardOutput "$gfnDir\host.log" -RedirectStandardError "$gfnDir\host_err.log" -WindowStyle Hidden
-          
-          # Đợi lấy link Cloudflare
+          Start-Sleep -Seconds 6
+
+          # Mở Cloudflare Tunnel cho port 8080 của BetterGFN
+          Write-Host "[+] Mở Cloudflare WebSocket Tunnel cho port 8080..."
+          Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "cloudflared.exe" -TimeoutSec 60
+          Start-Process -FilePath ".\cloudflared.exe" -ArgumentList "tunnel --url http://localhost:8080 --logfile cloudflared.log --no-autoupdate" -WindowStyle Hidden
+
+          # Bắt link Cloudflare WebSocket
           $wsUrl = ""
           for ($i = 1; $i -le 30; $i++) {
             Start-Sleep -Seconds 2
-            if (Test-Path "$gfnDir\host.log") {
-              $logContent = Get-Content "$gfnDir\host.log" -Raw -ErrorAction SilentlyContinue
-              if ($logContent -match '(https?://[a-zA-Z0-9-]+\.trycloudflare\.com)') {
-                $rawDomain = $matches[1] -replace 'https?://', ''
-                $wsUrl = "ws://$rawDomain"
-                break
-              } elseif ($logContent -match '(wss?://[a-zA-Z0-9-]+\.trycloudflare\.com)') {
-                $wsUrl = $matches[1]
+            if (Test-Path "cloudflared.log") {
+              $log = Get-Content "cloudflared.log" -Raw -ErrorAction SilentlyContinue
+              if ($log -match 'https://([a-zA-Z0-9-]+\.trycloudflare\.com)') {
+                $wsUrl = "ws://$($matches[1])"
                 break
               }
             }
-            Write-Host "⏳ Đang tạo đường hầm WebSocket... ($i/30)"
+            Write-Host "⏳ Đang kết nối đường hầm BetterGFN... ($i/30)"
           }
 
           if (-not $wsUrl) {
-            Write-Host "❌ Lỗi bắt link BetterGFN. Log:"
-            Get-Content "$gfnDir\host.log" -ErrorAction SilentlyContinue | Write-Host
+            Write-Host "❌ Lỗi tạo link! Log:"
+            Get-Content "cloudflared.log" -ErrorAction SilentlyContinue | Write-Host
             exit 1
           }
 
           Write-Host ""
           Write-Host "=========================================================="
-          Write-Host "🎉 LINK KẾT NỐI SẴN SÀNG (CHỈ MẤT CHƯA ĐẦY 20 GIÂY):"
-          Write-Host "📌 DÁN VÀO APP BETTERGFN: $wsUrl"
+          Write-Host "🎉 THÔNG TIN KẾT NỐI VÀO APP BETTERGFN TRÊN ĐIỆN THOẠI:"
+          Write-Host "📌 DÁN VÀO Ô WEBSOCKET URL: $wsUrl"
           Write-Host "=========================================================="
           Write-Host ""
 
-          # Ghi tóm tắt không bị lỗi toán tử '-'
           $summary = "## 🎮 BetterGFN Remote Streaming Sẵn Sàng!`n`n" +
                      "👉 **Copy link dưới đây và dán vào app BetterGFN trên điện thoại:**`n" +
                      "```text`n$wsUrl`n````n`n" +
-                     "* Trạng thái: Host đang stream 60fps`n" +
-                     "* Tính năng: Đang tự cài đặt song song VS Code, Discord, Live Wallpaper"
+                     "* Đã kích hoạt Sunshine Host (47989)`n" +
+                     "* Stream WebSocket Cloudflare 60fps"
           $summary | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
           try {
@@ -211,7 +157,7 @@ jobs:
 
           "BETTERGFN_WS_URL=$wsUrl" | Out-File -Append $env:GITHUB_ENV
 
-      # --- 2. Duy trì phiên hoạt động ---
+      # --- 5. Duy trì phiên hoạt động ---
       - name: ⏳ Giữ VPS sống
         run: |
           $mins = [int]"${{ github.event.inputs.runtime_minutes }}"
@@ -219,17 +165,17 @@ jobs:
           $end = (Get-Date).AddMinutes($mins)
           $i = 0
 
-          Write-Host "🟢 BetterGFN Host đang hoạt động. Thời gian duy trì: $mins phút."
+          Write-Host "🟢 BetterGFN + Sunshine đang stream. Thời gian duy trì: $mins phút."
           
           while ((Get-Date) -lt $end) {
             $i++
             $left = $end - (Get-Date)
             $leftStr = if ($left.TotalSeconds -gt 0) { $left.ToString('hh\:mm\:ss') } else { '00:00:00' }
-            Write-Host "[$((Get-Date).ToString('HH:mm:ss'))] Heartbeat #$i | Còn lại: $leftStr | Stream URL: $env:BETTERGFN_WS_URL"
+            Write-Host "[$((Get-Date).ToString('HH:mm:ss'))] Heartbeat #$i | Còn lại: $leftStr | URL: $env:BETTERGFN_WS_URL"
             Start-Sleep -Seconds 60
           }
 
-      # --- 3. Tự động Restart phiên mới (Tự động nhận diện ID) ---
+      # --- 6. Tự động Restart phiên mới ---
       - name: 🔄 Tự động Restart phiên mới
         if: always()
         run: |
@@ -254,7 +200,7 @@ jobs:
             Write-Host "🎯 Tự động phát hiện Workflow ID: $wfId"
 
             Invoke-RestMethod -Uri "https://api.github.com/repos/${{ github.repository }}/actions/workflows/$wfId/dispatches" -Method Post -Headers $headers -Body $payload -TimeoutSec 30
-            Write-Host "✅ Đã trigger phiên BetterGFN tiếp theo thành công!"
+            Write-Host "✅ Đã trigger phiên tiếp theo thành công!"
           } catch {
             Write-Warning "Lỗi trigger: $($_.Exception.Message)"
           }
