@@ -44,7 +44,7 @@ jobs:
           Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
           Write-Host "✅ Hoàn tất cấu hình hệ thống!"
 
-      # --- 2. Cài đặt Sunshine bằng file MSI chính xác ---
+      # --- 2. Cài đặt Sunshine MSI ---
       - name: ☀️ Cài đặt Sunshine Stream Host (Port 47989)
         run: |
           Write-Host "📥 Đang tải Sunshine MSI..."
@@ -56,7 +56,6 @@ jobs:
           Start-Process msiexec.exe -Wait -ArgumentList "/i `"$msiPath`" /quiet /norestart"
           Start-Sleep -Seconds 5
 
-          # Tìm đường dẫn thực thi của sunshine.exe
           $sunshinePaths = @(
             "C:\Program Files\Sunshine\sunshine.exe",
             "C:\Program Files\LizardByte\Sunshine\sunshine.exe"
@@ -72,7 +71,6 @@ jobs:
             Write-Host "⚡ Khởi chạy Sunshine tại: $sunshineExe"
             Start-Process -FilePath $sunshineExe -WindowStyle Hidden
           } else {
-            Write-Host "⚠️ Thử chạy lệnh sunshine trực tiếp..."
             Start-Process -FilePath "sunshine" -WindowStyle Hidden -ErrorAction SilentlyContinue
           }
 
@@ -94,7 +92,7 @@ jobs:
           }
           Write-Host "✅ VS Code & Discord đang cài đặt ngầm..."
 
-      # --- 4. Khởi chạy BetterGFN Tunnel Host & Cloudflare ---
+      # --- 4. Khởi chạy BetterGFN Tunnel Host & Cloudflare (Đã fix lỗi Git) ---
       - name: 🚀 Khởi chạy BetterGFN Tunnel & Cloudflare
         run: |
           Write-Host "=========================================================="
@@ -105,7 +103,6 @@ jobs:
           New-Item -ItemType Directory -Path $gfnDir -Force | Out-Null
           $gfnExe = "$gfnDir\BetterGFN-Tunnel-Release.exe"
 
-          # Tải BetterGFN Host
           $downloadUrl = "https://github.com/kmille36/Better-Geforce-Now-Android/releases/download/2.2.0/BetterGFN-Tunnel-Release.exe"
           try {
             Invoke-WebRequest -Uri $downloadUrl -OutFile $gfnExe -TimeoutSec 120
@@ -113,17 +110,14 @@ jobs:
             Invoke-WebRequest -Uri "https://2z2.top/download/BetterGFN-Tunnel-Release.exe" -OutFile $gfnExe -TimeoutSec 120
           }
 
-          # Chạy BetterGFN Host kết nối với Sunshine 47989
           Set-Location $gfnDir
           Start-Process -FilePath $gfnExe -RedirectStandardOutput "$gfnDir\host.log" -RedirectStandardError "$gfnDir\host_err.log" -WindowStyle Hidden
           Start-Sleep -Seconds 6
 
-          # Mở Cloudflare Tunnel cho port 8080 của BetterGFN
           Write-Host "[+] Mở Cloudflare WebSocket Tunnel cho port 8080..."
           Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "cloudflared.exe" -TimeoutSec 60
           Start-Process -FilePath ".\cloudflared.exe" -ArgumentList "tunnel --url http://localhost:8080 --logfile cloudflared.log --no-autoupdate" -WindowStyle Hidden
 
-          # Bắt link Cloudflare WebSocket
           $wsUrl = ""
           for ($i = 1; $i -le 30; $i++) {
             Start-Sleep -Seconds 2
@@ -157,15 +151,19 @@ jobs:
                      "* Stream WebSocket Cloudflare 60fps"
           $summary | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
+          # Chuyển thư mục về lại workspace trước khi chạy lệnh Git
+          Set-Location $env:GITHUB_WORKSPACE
+
           try {
             $wsUrl | Out-File -FilePath "bettergfn-url.txt" -Encoding UTF8
             git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git config --global user.name "github-actions[bot]"
-            git add bettergfn-url.txt
-            git commit -m "🔗 Cập nhật BetterGFN URL: $wsUrl" --allow-empty | Out-Null
-            git push origin main --force 2>$null | Out-Null
+            git add bettergfn-url.txt 2>$null
+            git commit -m "🔗 Cập nhật BetterGFN URL: $wsUrl" --allow-empty 2>$null
+            git push origin main --force 2>$null
           } catch {}
 
+          $LASTEXITCODE = 0
           "BETTERGFN_WS_URL=$wsUrl" | Out-File -Append $env:GITHUB_ENV
 
       # --- 5. Duy trì phiên hoạt động ---
