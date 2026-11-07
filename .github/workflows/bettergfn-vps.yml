@@ -31,10 +31,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      # --- 1. Tạo User & Mở Firewall ---
+      # --- 1. Tạo User & Mở Toàn Bộ Cổng Firewall ---
       - name: 🔓 Cấu hình hệ thống & Firewall
         run: |
-          Write-Host "🔧 Cấu hình User và tắt Firewall..."
+          Write-Host "🔧 1. Tạo User và mở Firewall..."
           $u = $env:RDP_USER; $p = $env:RDP_PASS
           $sec = ConvertTo-SecureString $p -AsPlainText -Force
           if (-not (Get-LocalUser -Name $u -EA SilentlyContinue)) {
@@ -42,40 +42,55 @@ jobs:
             Add-LocalGroupMember -Group "Administrators" -Member $u
           }
           Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
+
+          # Ép độ phân giải màn hình ảo 1080p
+          Set-DisplayResolution -Width 1920 -Height 1080 -Force -ErrorAction SilentlyContinue
           Write-Host "✅ Hoàn tất cấu hình hệ thống!"
 
-      # --- 2. Cài đặt Sunshine MSI ---
-      - name: ☀️ Cài đặt Sunshine Stream Host (Port 47989)
+      # --- 2. Cài đặt & Khởi tạo Sunshine Đúng Chuẩn ---
+      - name: ☀️ Cài đặt & Kích hoạt Sunshine Stream Host (47989)
         run: |
-          Write-Host "📥 Đang tải Sunshine MSI..."
+          Write-Host "📥 1. Đang tải Sunshine MSI..."
           $sunshineUrl = "https://github.com/LizardByte/Sunshine/releases/download/v2026.1106.201906/Sunshine-Windows-AMD64-installer.msi"
-          $msiPath = "$env:TEMP\Sunshine-installer.msi"
+          $msiPath = "$env:TEMP\Sunshine.msi"
           Invoke-WebRequest -Uri $sunshineUrl -OutFile $msiPath -TimeoutSec 180
 
-          Write-Host "🚀 Đang cài đặt Sunshine ngầm qua msiexec..."
+          Write-Host "🚀 2. Đang cài đặt Sunshine qua msiexec..."
           Start-Process msiexec.exe -Wait -ArgumentList "/i `"$msiPath`" /quiet /norestart"
           Start-Sleep -Seconds 5
 
-          $sunshinePaths = @(
-            "C:\Program Files\Sunshine\sunshine.exe",
-            "C:\Program Files\LizardByte\Sunshine\sunshine.exe"
-          )
-          $sunshineExe = $sunshinePaths | Where-Object { Test-Path $_ } | Select-Object -First 1
-
-          if (-not $sunshineExe) {
+          # Tìm file sunshine.exe
+          $sunshineExe = "C:\Program Files\Sunshine\sunshine.exe"
+          if (-not (Test-Path $sunshineExe)) {
             $found = Get-ChildItem -Path "C:\Program Files" -Filter "sunshine.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
             if ($found) { $sunshineExe = $found.FullName }
           }
 
           if ($sunshineExe) {
-            Write-Host "⚡ Khởi chạy Sunshine tại: $sunshineExe"
+            Write-Host "🔑 3. Tạo tài khoản cấu hình cho Sunshine..."
+            # Cấu hình tài khoản admin ngầm không cần mở Web UI
+            Start-Process -FilePath $sunshineExe -ArgumentList "--creds admin Kandagw@12345" -Wait -WindowStyle Hidden -ErrorAction SilentlyContinue
+
+            Write-Host "⚡ 4. Khởi chạy Sunshine Service ngầm..."
             Start-Process -FilePath $sunshineExe -WindowStyle Hidden
-          } else {
-            Start-Process -FilePath "sunshine" -WindowStyle Hidden -ErrorAction SilentlyContinue
           }
 
-          Start-Sleep -Seconds 8
-          Write-Host "✅ Sunshine đã hoạt động trên cổng 47989!"
+          # Đợi Sunshine mở cổng 47989
+          $sunshineReady = $false
+          for ($attempt = 1; $attempt -le 15; $attempt++) {
+            Start-Sleep -Seconds 2
+            $test = Test-NetConnection -ComputerName "127.0.0.1" -Port 47989 -WarningAction SilentlyContinue
+            if ($test.TcpTestSucceeded) {
+              $sunshineReady = $true
+              Write-Host "✅ Sunshine đã sẵn sàng lắng nghe tại cổng 47989!"
+              break
+            }
+            Write-Host "⏳ Đang đợi Sunshine khởi tạo... ($attempt/15)"
+          }
+
+          if (-not $sunshineReady) {
+            Write-Warning "⚠️ Cổng 47989 phản hồi chậm, tiếp tục tiến trình..."
+          }
 
       # --- 3. Cài đặt các ứng dụng song song ngầm ---
       - name: ⚡ Cài đặt VS Code & Discord ngầm
@@ -92,8 +107,8 @@ jobs:
           }
           Write-Host "✅ VS Code & Discord đang cài đặt ngầm..."
 
-      # --- 4. Khởi chạy BetterGFN Tunnel Host & Cloudflare (Đã fix lỗi Git) ---
-      - name: 🚀 Khởi chạy BetterGFN Tunnel & Cloudflare
+      # --- 4. Khởi chạy BetterGFN Host & Cloudflare WSS Tunnel ---
+      - name: 🚀 Khởi chạy BetterGFN Tunnel & Cloudflare WSS
         run: |
           Write-Host "=========================================================="
           Write-Host "  KHỞI ĐỘNG BETTERGFN TUNNEL HOST..."
@@ -103,6 +118,7 @@ jobs:
           New-Item -ItemType Directory -Path $gfnDir -Force | Out-Null
           $gfnExe = "$gfnDir\BetterGFN-Tunnel-Release.exe"
 
+          # Tải BetterGFN Host
           $downloadUrl = "https://github.com/kmille36/Better-Geforce-Now-Android/releases/download/2.2.0/BetterGFN-Tunnel-Release.exe"
           try {
             Invoke-WebRequest -Uri $downloadUrl -OutFile $gfnExe -TimeoutSec 120
@@ -110,28 +126,33 @@ jobs:
             Invoke-WebRequest -Uri "https://2z2.top/download/BetterGFN-Tunnel-Release.exe" -OutFile $gfnExe -TimeoutSec 120
           }
 
+          # Khởi động BetterGFN Host
           Set-Location $gfnDir
           Start-Process -FilePath $gfnExe -RedirectStandardOutput "$gfnDir\host.log" -RedirectStandardError "$gfnDir\host_err.log" -WindowStyle Hidden
           Start-Sleep -Seconds 6
 
-          Write-Host "[+] Mở Cloudflare WebSocket Tunnel cho port 8080..."
+          # Mở Cloudflare Tunnel với cấu hình chuẩn WebSocket (HTTP/2 & Edge-IP auto)
+          Write-Host "[+] Đang mở Cloudflare WSS Tunnel cho port 8080..."
           Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "cloudflared.exe" -TimeoutSec 60
-          Start-Process -FilePath ".\cloudflared.exe" -ArgumentList "tunnel --url http://localhost:8080 --logfile cloudflared.log --no-autoupdate" -WindowStyle Hidden
+          Start-Process -FilePath ".\cloudflared.exe" -ArgumentList "tunnel --url http://localhost:8080 --logfile cloudflared.log --no-autoupdate --protocol http2" -WindowStyle Hidden
 
-          $wsUrl = ""
+          # Bắt link Cloudflare và chuẩn hóa thành wss://
+          $wssUrl = ""
           for ($i = 1; $i -le 30; $i++) {
             Start-Sleep -Seconds 2
             if (Test-Path "cloudflared.log") {
               $log = Get-Content "cloudflared.log" -Raw -ErrorAction SilentlyContinue
               if ($log -match 'https://([a-zA-Z0-9-]+\.trycloudflare\.com)') {
-                $wsUrl = "ws://$($matches[1])"
+                $rawDomain = $matches[1]
+                # Bắt buộc dùng wss:// để không bị lỗi HTTP 301 Redirect của Cloudflare
+                $wssUrl = "wss://$rawDomain"
                 break
               }
             }
-            Write-Host "⏳ Đang kết nối đường hầm BetterGFN... ($i/30)"
+            Write-Host "⏳ Đang kết nối Cloudflare WSS... ($i/30)"
           }
 
-          if (-not $wsUrl) {
+          if (-not $wssUrl) {
             Write-Host "❌ Lỗi tạo link! Log:"
             Get-Content "cloudflared.log" -ErrorAction SilentlyContinue | Write-Host
             exit 1
@@ -139,32 +160,32 @@ jobs:
 
           Write-Host ""
           Write-Host "=========================================================="
-          Write-Host "🎉 THÔNG TIN KẾT NỐI VÀO APP BETTERGFN TRÊN ĐIỆN THOẠI:"
-          Write-Host "📌 DÁN VÀO Ô WEBSOCKET URL: $wsUrl"
+          Write-Host "🎉 THÔNG TIN KẾT NỐI VÀO APP BETTERGFN (ĐÃ FIX WS ERROR):"
+          Write-Host "👉 LINK 1 (KHUYÊN DÙNG - BẢO MẬT WSS): $wssUrl"
+          Write-Host "👉 LINK 2 (DỰ PHÒNG NẾU APP BẮT BUỘC WS): $($wssUrl -replace 'wss://', 'ws://')"
           Write-Host "=========================================================="
           Write-Host ""
 
           $summary = "## 🎮 BetterGFN Remote Streaming Sẵn Sàng!`n`n" +
-                     "👉 **Copy link dưới đây và dán vào app BetterGFN trên điện thoại:**`n" +
-                     "```text`n$wsUrl`n````n`n" +
-                     "* Đã kích hoạt Sunshine Host (47989)`n" +
-                     "* Stream WebSocket Cloudflare 60fps"
+                     "👉 **Dán đường link dưới đây vào app BetterGFN trên điện thoại:**`n" +
+                     "```text`n$wssUrl`n````n`n" +
+                     "* Đã sửa lỗi: Tự động dùng chuẩn WSS (WebSocket Secure)`n" +
+                     "* Đã kích hoạt: Sunshine Host (47989)"
           $summary | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
-          # Chuyển thư mục về lại workspace trước khi chạy lệnh Git
+          # Trở về workspace trước khi commit Git
           Set-Location $env:GITHUB_WORKSPACE
-
           try {
-            $wsUrl | Out-File -FilePath "bettergfn-url.txt" -Encoding UTF8
+            $wssUrl | Out-File -FilePath "bettergfn-url.txt" -Encoding UTF8
             git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git config --global user.name "github-actions[bot]"
             git add bettergfn-url.txt 2>$null
-            git commit -m "🔗 Cập nhật BetterGFN URL: $wsUrl" --allow-empty 2>$null
+            git commit -m "🔗 Cập nhật BetterGFN URL: $wssUrl" --allow-empty 2>$null
             git push origin main --force 2>$null
           } catch {}
 
           $LASTEXITCODE = 0
-          "BETTERGFN_WS_URL=$wsUrl" | Out-File -Append $env:GITHUB_ENV
+          "BETTERGFN_WS_URL=$wssUrl" | Out-File -Append $env:GITHUB_ENV
 
       # --- 5. Duy trì phiên hoạt động ---
       - name: ⏳ Giữ VPS sống
